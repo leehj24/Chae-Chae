@@ -10,6 +10,11 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
+import unicodedata as ud
+import re
+import requests
+import urllib.parse
+
 from flask import (
     Flask,
     Response,
@@ -18,13 +23,18 @@ from flask import (
     request,
     session,
     url_for,
+    abort,
 )
 from flask_session import Session
 
 # 추천 엔진 모듈
 from recommend import run_walk as run_walk_module
 from recommend import run_transit as run_transit_module
-from recommend.config import PATH_TMF  # 홈 카드용 CSV 절대경로
+from recommend.config import (
+    PATH_TMF,               # 홈 카드용 CSV 절대경로
+    KAKAO_API_KEY,          # 카카오 REST API 키
+    PATH_KAKAO_IMAGE_CACHE, # 이미지 URL 캐시 JSON 경로
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -203,6 +213,152 @@ def _sort_key_from_param(s: str) -> tuple[str, str]:
         return "review_score", "인기도 지수"
     return "tour_score", "관광 지수"
 
+# ─────────────────────────────────────────
+# Kakao 이미지 검색 + JSON 캐시
+# ─────────────────────────────────────────
+_IMAGE_CACHE: dict[str, dict] | None = None
+_SESSION: requests.Session | None = None
+DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+def _nfc(s: str) -> str:
+    return ud.normalize("NFC", str(s or "")).strip()
+
+def _load_image_cache() -> dict:
+    """캐시 JSON을 로드 (없으면 빈 dict)."""
+    global _IMAGE_CACHE
+    if _IMAGE_CACHE is not None:
+        return _IMAGE_CACHE
+    p = Path(PATH_KAKAO_IMAGE_CACHE)
+    if p.exists():
+        try:
+            _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            _IMAGE_CACHE = {}
+    else:
+        _IMAGE_CACHE = {}
+    return _IMAGE_CACHE
+
+def _save_image_cache():
+    """메모리 캐시를 디스크로 반영."""
+    try:
+        p = Path(PATH_KAKAO_IMAGE_CACHE)
+        p.write_text(json.dumps(_IMAGE_CACHE or {}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _ensure_session():
+    """공유 세션 준비 + Kakao 헤더/UA 주입."""
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+        _SESSION.headers.update({"User-Agent": DEFAULT_UA})
+    if KAKAO_API_KEY and _SESSION.headers.get("Authorization") is None:
+        _SESSION.headers.update({"Authorization": f"KakaoAK {KAKAO_API_KEY}"})
+
+def _is_url_alive(url: str) -> bool:
+    """이미지 URL이 실제로 열리는지 빠르게 검사."""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return False
+    try:
+        _ensure_session()
+        # 일부 서버는 HEAD 미지원 → GET(stream)로 폴백
+        r = _SESSION.head(url, allow_redirects=True, timeout=4)
+        ok = 200 <= r.status_code < 400
+        ct = (r.headers.get("content-type") or "").lower()
+        if ok and ("image" in ct or ct == "" or url.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"))):
+            return True
+        r = _SESSION.get(url, stream=True, timeout=6)
+        ok = 200 <= r.status_code < 400
+        ct = (r.headers.get("content-type") or "").lower()
+        r.close()
+        return ok and ("image" in ct or url.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg")))
+    except Exception:
+        return False
+
+def _filter_live_urls(urls: List[str], max_n: int) -> List[str]:
+    """중복 제거 + 살아있는 URL만 상한 개수까지."""
+    out, seen = [], set()
+    for u in urls:
+        u = (u or "").strip()
+        if not u or u in seen:
+            continue
+        if _is_url_alive(u):
+            out.append(u)
+            seen.add(u)
+            if len(out) >= max_n:
+                break
+    return out
+
+def _addr_region_tokens(addr1: str) -> List[str]:
+    """
+    addr1 문자열에서 시/군/구/읍/면/동 토큰을 최대 3개 추출.
+    예) '서울특별시 강남구 역삼동 123-4' -> ['서울', '강남구', '역삼동']
+    """
+    t = _nfc(addr1)
+    cand = re.findall(r"\b[\w가-힣]+(?:특별시|광역시|특별자치시|특별자치도|도|시|군|구|읍|면|동)\b", t)
+    if not cand:
+        cand = [w for w in re.split(r"[,\s]+", t) if w]
+    simp = []
+    for w in cand:
+        w2 = w
+        w2 = w2.replace("특별시", "시").replace("광역시", "시").replace("특별자치시", "시").replace("특별자치도", "도")
+        if w2.endswith("도"):
+            w2 = w2[:-1]
+        if w2 not in simp:
+            simp.append(w2)
+    return simp[:3]
+
+def _kakao_image_search(query: str, size: int = 4) -> List[str]:
+    """Kakao /v2/search/image 호출 → 정상 이미지 URL 배열 반환."""
+    if not KAKAO_API_KEY:
+        return []
+    _ensure_session()
+    try:
+        params = {
+            "query": query,
+            "sort": "accuracy",
+            "page": 1,
+            "size": max(1, min(10, int(size))),
+        }
+        r = _SESSION.get("https://dapi.kakao.com/v2/search/image", params=params, timeout=5)
+        if r.status_code != 200:
+            return []
+        docs = r.json().get("documents", []) or []
+        urls = [d.get("image_url") for d in docs if str(d.get("image_url") or "").startswith("http")]
+        urls = [u for u in urls if len(u) < 2000]
+        return _filter_live_urls(urls, max_n=size)
+    except Exception:
+        return []
+
+def _image_cache_key(title: str, addr1: str) -> str:
+    return f"{_nfc(title)}|{_nfc(addr1)}"
+
+def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
+    """
+    - 캐시에서 조회(죽은 링크 제거)
+    - 없거나 전부 죽었으면 Kakao 이미지 검색
+    - 항상 title+addr1 기준으로 요청
+    """
+    cache = _load_image_cache()
+    key = _image_cache_key(title, addr1)
+    cached = cache.get(key)
+
+    if cached and isinstance(cached.get("urls"), list):
+        live = _filter_live_urls(cached["urls"], max_n)
+        if live != cached["urls"]:
+            cache[key]["urls"] = live
+            _save_image_cache()
+        if live:
+            return live[:max_n]
+
+    tokens = _addr_region_tokens(addr1)
+    q = " ".join([_nfc(title)] + tokens)
+    urls = _kakao_image_search(q, size=max_n)
+    cache[key] = {"q": q, "urls": urls, "ts": int(datetime.now().timestamp())}
+    _save_image_cache()
+    return urls[:max_n]
+
 # ── ‘질문 말풍선’ 고정 노출용 헬퍼들 ─────────────────────────
 def _persist_region_prompt_once():
     html = "안녕하세요! 😊<br /><b>어떤 지역</b>으로 여행 가실 건가요? 아래 입력창에 지역명을 적어주세요."
@@ -339,13 +495,10 @@ def home() -> Response:
 @app.get("/api/places")
 def api_places() -> Response:
     """
-    /api/places?sort=review|tour&page=1&per_page=40
-    응답: { ok, sort_label, total, page, per_page, total_pages, items:[...] }
-
-    정렬 규칙:
-      1) 드롭다운으로 고른 컬럼(review_score|tour_score) 내림차순(높은 점수 먼저)
-      2) 동점(특히 0점)은 title 오름차순(가나다)
-      3) NaN/null 점수는 가장 뒤 (그 안에서도 title 오름차순)
+    카드 목록 API.
+    - CSV의 firstimage가 있으면 우선 사용(실제 살아있는 URL만)
+    - 그 외 Kakao 검색 이미지(검증됨)를 뒤에 추가
+    - images 배열/firstimage는 모두 살아있는 주소만 내려감
     """
     try:
         df = _load_places_df()
@@ -356,7 +509,6 @@ def api_places() -> Response:
 
         score_col, score_label = _sort_key_from_param(sort)
 
-        # 내림차순 + 동점 제목 ㄱㄴㄷ + NaN은 맨 뒤
         df = df.sort_values(
             by=[score_col, "title"],
             ascending=[False, True],
@@ -378,24 +530,33 @@ def api_places() -> Response:
 
         items: List[Dict[str, Any]] = []
         for _, r in view.iterrows():
-            images = []
-            for col in ("firstimage", "firstimage2"):
-                v = str(r.get(col, "")).strip()
-                if v and v.lower() not in {"nan", "none", "null"}:
-                    images.append(v)
+            title = str(r["title"])
+            addr1 = str(r["addr1"])
+
+            # 1) CSV firstimage 우선(살아있는 URL만)
+            csv_first = (str(r.get("firstimage", "")) or "").strip()
+            images: List[str] = [csv_first] if _is_url_alive(csv_first) else []
+
+            # 2) Kakao 이미지(검증됨) 추가
+            kakao_imgs = _images_for_place(title, addr1, max_n=4)
+            for u in kakao_imgs:
+                if u and u not in images:
+                    images.append(u)
+
+            first = images[0] if images else ""  # 카드 첫 장
 
             items.append({
                 "rank": int(r["rank"]),
-                "title": str(r["title"]),
-                "addr1": str(r["addr1"]),
+                "title": title,
+                "addr1": addr1,
                 "cat1":  str(r["cat1"]),
                 "cat3":  str(r.get("cat3", "") or ""),
-                "firstimage":  str(r.get("firstimage", "") or ""),
-                "firstimage2": str(r.get("firstimage2", "") or ""),
-                "images": images,
+                "firstimage":  first,   # ✅ 첫 장
+                "firstimage2": "",      # 더이상 사용하지 않음
+                "images": images,       # ✅ 프론트 캐러셀 소스
                 "tour_score":   _float_or_none(r.get("tour_score")),
                 "review_score": _float_or_none(r.get("review_score")),
-                "score": int(r["score_value"]),  # 현재 정렬 기준 점수의 정수 배지
+                "score": int(r["score_value"]),
             })
 
         return _json({
@@ -411,6 +572,38 @@ def api_places() -> Response:
     except Exception as e:
         tb = traceback.format_exc(limit=6)
         return _json({"ok": False, "error": str(e), "trace": tb}, 500)
+
+# -----------------------
+# 이미지 프록시 (임베드 차단 우회)
+# -----------------------
+@app.get("/img-proxy")
+def img_proxy() -> Response:
+    """
+    사용법: /img-proxy?u=<원본이미지URL>
+    - 허용: http/https
+    - Referer 제거, 브라우저 UA 사용
+    - 24시간 캐시 가능
+    """
+    raw = (request.args.get("u") or "").strip()
+    if not raw:
+        return abort(400)
+    url = urllib.parse.unquote(raw)
+    if not url.startswith(("http://", "https://")):
+        return abort(400)
+    try:
+        _ensure_session()
+        r = _SESSION.get(url, timeout=8, stream=True, headers={"Referer": ""})
+        data = r.content
+        ct = (r.headers.get("content-type") or "").lower()
+        if not ct or "image" not in ct:
+            ct = "image/jpeg"
+        return Response(
+            data,
+            mimetype=ct,
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
+    except Exception:
+        return abort(502)
 
 # -----------------------
 # (채팅) 인덱스 페이지: /chat 이동
@@ -633,4 +826,3 @@ if __name__ == "__main__":
     print("[INFO] templates/index.html =", (BASE_DIR / "templates" / "index.html").exists())
     print("[INFO] static dir =", BASE_DIR / "static")
     app.run(host="0.0.0.0", port=5000, debug=True)
-# <-- 여기서 파일 끝! 아래에 HTML 들어가 있으면 전부 삭제

@@ -1,6 +1,6 @@
 /* static/js/home.js
-   - 카드 캐러셀: 클릭 이벤트 바인딩, hover 시 화살표 표시
-   - 처음/마지막 장에서 <, > 자동 숨김 (순환 이동 제거)
+   - 이미지 임베드 차단 우회: 프록시 사용 + no-referrer
+   - 실패 이미지 슬라이드/점 제거
    - 서버 페이지네이션 & 정렬 드롭다운
 */
 (() => {
@@ -26,6 +26,10 @@
 
   const PAGE_SIZE   = 40;  // 4 x 10
   const PAGE_WINDOW = 10;  // 10페이지 단위 창
+
+  // --- 이미지 프록시 사용 (항상 true 권장)
+  const useProxy = true;
+  const proxied = (u) => useProxy ? `/img-proxy?u=${encodeURIComponent(u)}` : u;
 
   let items = [];        // 현재 페이지 데이터
   let currentPage = 1;
@@ -86,7 +90,7 @@
     }
   };
 
-  // JSON을 그대로 보존: 점수는 원본 값 그대로 들고 다님
+  // JSON을 그대로 보존
   const sanitizeItem = (r) => {
     const images = (Array.isArray(r.images) ? r.images : [r.firstimage, r.firstimage2]).filter(isNonEmpty);
     return {
@@ -95,8 +99,8 @@
       addr1: r.addr1 ?? '',
       cat1:  r.cat1  ?? '',
       cat3:  r.cat3  ?? '',
-      tour_score:   r.tour_score,    // 원본
-      review_score: r.review_score,  // 원본
+      tour_score:   r.tour_score,
+      review_score: r.review_score,
       images,
     };
   };
@@ -124,7 +128,7 @@
     return `<span class="chip" style="background:${bg};color:${fg};border-color:${border}">${escapeHtml(text)}</span>`;
   };
 
-  // UI 표시용: 원본 점수 → ×100 → 소수점 1자리 (숫자 아님/공백은 '-')
+  // UI 표시용: 원본 점수 → ×100 → 소수점 1자리
   const formatBadge = (raw) => {
     if (!isNonEmpty(raw)) return '-';
     const n = Number(String(raw).replace(/,/g, ''));
@@ -151,6 +155,41 @@
     next.hidden = (i >= count - 1);
   };
 
+  // 실패 이미지 처리
+  window.handleImgError = function(e){
+    const img = e.target;
+    const slides = img.closest('.slides');
+    const carousel = img.closest('.carousel');
+    const dotsWrap = $('.dots', carousel);
+    if (!slides || !carousel) return;
+
+    // 해당 이미지 제거
+    try { img.remove(); } catch(_) {}
+
+    // 점(마지막 점) 하나 제거
+    const dotList = $$('.dots .dot', carousel);
+    if (dotList.length) {
+      dotList[dotList.length - 1].remove();
+    }
+
+    // 남은 슬라이드 수 갱신
+    const remain = slides.children.length;
+    carousel.dataset.count = String(remain);
+
+    if (remain <= 1) {
+      const prev = $('.cbtn.prev', carousel);
+      const next = $('.cbtn.next', carousel);
+      if (prev) prev.hidden = true;
+      if (next) next.hidden = true;
+      if (dotsWrap) dotsWrap.remove();
+    }
+
+    if (remain === 0) {
+      slides.insertAdjacentHTML('afterend', '<div class="noimage">이미지 없음</div>');
+      slides.remove();
+    }
+  };
+
   const renderGrid = () => {
     if (!grid) return;
     if (!items.length) {
@@ -167,20 +206,29 @@
       const cat1  = row.cat1  || '';
       const cat3s = splitCat3(row.cat3);
       const imgs  = (row.images || []).filter(isNonEmpty);
-      const imgCount = imgs.length;
+      const imgP  = imgs.map(proxied);
+      const imgCount = imgP.length;
 
       const showNav = imgCount > 1;          // 1장이면 화살표/점 숨김
       const hasImage = imgCount > 0;
 
       const dots = showNav
         ? `<div class="dots" role="tablist" aria-label="이미지 선택 점">
-             ${imgs.map((_, di) => `<button type="button" class="dot" data-action="dot" data-i="${di}" aria-label="${di+1}번째 이미지"></button>`).join('')}
+             ${imgP.map((_, di) => `<button type="button" class="dot" data-action="dot" data-i="${di}" aria-label="${di+1}번째 이미지"></button>`).join('')}
            </div>` : '';
 
       const slides = hasImage
         ? `<div class="slides" style="transform:translateX(0%)">
-             ${imgs.map((src, si) => `<img src="${src}" alt="${escapeHtml(title)} 이미지 ${si+1}" loading="lazy">`).join('')}
-           </div>` : `<div class="noimage">이미지 없음</div>`;
+             ${imgP.map((src, si) => `
+                <img src="${src}"
+                     alt="${escapeHtml(title)} 이미지 ${si+1}"
+                     loading="lazy"
+                     referrerpolicy="no-referrer"
+                     crossorigin="anonymous"
+                     onerror="handleImgError(event)">
+             `).join('')}
+           </div>`
+        : `<div class="noimage">이미지 없음</div>`;
 
       const carousel = `
         <div class="carousel" data-slide="0" data-count="${imgCount}">
