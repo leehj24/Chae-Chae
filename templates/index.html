@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>채채</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  {% set state = session.get('state', '지역') %}
+
+  <!-- 상단 바 -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <!-- 👈 왼쪽 상단: 홈페이지 버튼 -->
+      <a class="home-btn" href="{{ url_for('home') }}" aria-label="홈페이지로 가기">🏠 홈페이지</a>
+
+      <!-- 로고(눌러도 홈 이동) -->
+      <a class="logo" href="{{ url_for('home') }}" aria-label="홈으로" title="홈으로"
+         style="text-decoration:none;color:inherit">
+        <span class="dot"></span>
+        <strong>채채</strong>
+      </a>
+
+      <!-- 오른쪽 액션들 -->
+      <div class="topbar-actions">
+        {% if state != '지역' %}
+          <a class="home-btn ghost" href="{{ url_for('go_back') }}">뒤로 가기</a>
+        {% endif %}
+        <a class="home-btn" href="{{ url_for('reset_chat') }}">새로 시작</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="chat-page">
+    <section id="chat-window" class="chat-window" data-state="{{ state }}">
+      <!-- 기존 대화 렌더 -->
+      {% for msg in session.get('messages', []) %}
+        <div class="msg {{ 'user' if msg['sender'] == 'user' else 'bot' }}">
+          <div class="bubble">
+            {% if msg.get('html') %}
+              {{ msg['html']|safe }}
+            {% else %}
+              {{ msg['text'] }}
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+
+      <!-- ① 지역 -->
+      {% if state == '지역' %}
+        <div class="msg bot">
+          <div class="bubble">
+            안녕하세요! 😊<br />
+            <b>어떤 지역</b>으로 여행 가실 건가요? 아래 입력창에 지역명을 적어주세요.
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ② 점수기준 -->
+      {% if state == '점수' %}
+        <div class="msg bot">
+          <div class="bubble">
+            어떤 기준으로 추천할까요? <b>관광지수 vs 인기도지수</b><br />하나만 선택해 주세요.
+            <div class="pref-wrap">
+              <button type="button" class="score-btn theme-btn" data-value="관광지수" aria-pressed="false">
+                <span class="icon">🗺️</span><span class="label">관광지수</span>
+              </button>
+              <button type="button" class="score-btn theme-btn" data-value="인기도지수" aria-pressed="false">
+                <span class="icon">🔥</span><span class="label">인기도지수</span>
+              </button>
+            </div>
+            <form id="scoreForm" method="post" action="{{ url_for('chat') }}">
+              <input type="hidden" name="score" id="scoreInput" />
+            </form>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ③ 테마 -->
+      {% if state == '테마' %}
+        {% set theme_icons = {'자연':'🌳','레포츠':'🏄','쇼핑':'🛍️','음식':'🍴','인문(문화/예술/역사)':'📚'} %}
+        {% set theme_items = [
+          {'label':'자연','value':'자연'},
+          {'label':'레포츠','value':'레포츠'},
+          {'label':'쇼핑','value':'쇼핑'},
+          {'label':'음식','value':'음식'},
+          {'label':'문화','value':'인문(문화/예술/역사)'}
+        ] %}
+        <div class="msg bot">
+          <div class="bubble">
+            좋아요! 이제 <b>원하는 테마를 최대 3개</b>까지 골라주세요. (다시 누르면 해제돼요)
+            <div class="theme-wrap">
+              {% for item in theme_items %}
+                <button type="button" class="theme-btn" data-value="{{ item.value }}">
+                  <span class="icon">{{ theme_icons[item.value] }}</span>
+                  <span class="label">{{ item.label }}</span>
+                </button>
+              {% endfor %}
+            </div>
+            <div class="theme-actions">
+              <button id="themeClear" type="button" class="ghost-btn small">선택 초기화</button>
+              <button id="themeSubmit" type="button" class="primary-btn small" disabled>선택 완료 (0/3)</button>
+            </div>
+            <form id="themeForm" method="post" action="{{ url_for('chat') }}">
+              <input type="hidden" name="themes" id="themesInput" />
+            </form>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ④ 기간(날짜 범위) -->
+      {% if state == '기간' %}
+        <div class="msg bot">
+          <div class="bubble">
+            <b>여행 기간</b>을 선택해 주세요. 시작~종료 날짜를 고르면 <em>총 일수</em>가 자동 계산돼요.
+            <form id="rangeForm" method="post" action="{{ url_for('chat') }}" class="range-form">
+              <div class="date-row">
+                <div class="date-box">
+                  <label for="startDate">시작</label>
+                  <div class="date-field">
+                    <input id="startDate" class="date-input" type="date" name="start_date" aria-label="여행 시작일" />
+                    <button id="openStart" class="date-btn" type="button" aria-label="시작일 달력 열기" title="달력 열기">📅</button>
+                  </div>
+                </div>
+
+                <span class="date-tilde">~</span>
+
+                <div class="date-box">
+                  <label for="endDate">종료</label>
+                  <div class="date-field">
+                    <input id="endDate" class="date-input" type="date" name="end_date" aria-label="여행 종료일" />
+                    <button id="openEnd" class="date-btn" type="button" aria-label="종료일 달력 열기" title="달력 열기">📅</button>
+                  </div>
+                </div>
+
+                <div class="days-pill"><span id="daysPreview">—</span></div>
+                <button id="rangeSubmit" type="submit" class="primary-btn small" disabled>확인</button>
+              </div>
+              <div class="hint mt-2">1~100일 사이만 가능해요.</div>
+            </form>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ⑤ 이동수단 -->
+      {% if state == '이동수단' %}
+        <div class="msg bot">
+          <div class="bubble">
+            마지막으로, <b>어떤 이동수단</b>으로 맞출까요? (걷기 vs 대중교통)
+            <div class="pref-wrap">
+              <button type="button" class="transport-btn theme-btn" data-value="walk" aria-pressed="false">
+                <span class="icon">🚶</span><span class="label">걷기</span>
+              </button>
+              <button type="button" class="transport-btn theme-btn" data-value="transit" aria-pressed="false">
+                <span class="icon">🚋</span><span class="label">대중교통</span>
+              </button>
+            </div>
+            <form id="transportForm" method="post" action="{{ url_for('chat') }}">
+              <input type="hidden" name="transport" id="transportInput" />
+            </form>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- ⑥ 완료 (세로 스택 카드) -->
+      {% if state == '완료' %}
+        <div class="msg bot">
+          <div class="bubble">
+            <b>추천 일정이 준비됐어요!</b> Day 카드로 정리했습니다. ✨
+
+            {% set itin = session.get('itinerary', []) %}
+            {% if itin and itin|length > 0 %}
+              {% set groups = (itin|groupby('day'))|list %}
+              {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️'} %}
+
+              <div class="day-stack">
+                {% for day, rows in groups %}
+                  {% set rows = rows|list %}
+                  {% set raw_label = rows[0].get('day_label') or (day ~ '일') %}
+                  {% set day_label = (raw_label|replace('일차','')|replace('일','')) ~ '일차' %}
+                  {% set start_t = (rows|sort(attribute='start_time'))[0].start_time %}
+                  {% set end_t = (rows|sort(attribute='end_time'))[-1].end_time %}
+
+                  <section class="day-card" data-day="{{ day }}" aria-label="{{ day_label }}">
+                    <header class="day-card-header">
+                      <div class="left">
+                        <span class="day-chip">{{ day_label }}</span>
+                        <span class="day-range">{{ start_t }} ~ {{ end_t }}</span>
+                        <span class="day-steps">{{ rows|length }} 스텝</span>
+                      </div>
+                    </header>
+
+                    <ol class="timeline">
+                      {% for r in rows %}
+                        {% set is_move = (r.get('title') == '이동') %}
+                        <li class="tl-item {{ 'move' if is_move else 'visit' }}">
+                          <div class="tl-time">{{ r.get('start_time') }} – {{ r.get('end_time') }}</div>
+
+                          {% if is_move %}
+                            <div class="tl-title">🚇 이동</div>
+                            <div class="tl-body">
+                              <div class="route">
+                                <span class="chip sm">출발</span>
+                                <span class="text">{{ r.get('출발지') }}</span>
+                              </div>
+                              <div class="hint">
+                                {% if r.get('교통편1') %}<span class="chip sm">{{ r.get('교통편1') }}</span>{% endif %}
+                                {% if r.get('교통편2') %}<span class="chip sm">{{ r.get('교통편2') }}</span>{% endif %}
+                              </div>
+                              <div class="route">
+                                <span class="chip sm">도착</span>
+                                <span class="text">{{ r.get('도착지') }}</span>
+                              </div>
+                            </div>
+                            <div class="tl-meta">
+                              {% if r.get('move_min') %}<span class="pill">이동 {{ r.get('move_min') }}분</span>{% endif %}
+                              {% if r.get('distance_from_prev_km') %}<span class="pill">{{ r.get('distance_from_prev_km') }} km</span>{% endif %}
+                            </div>
+                          {% else %}
+                            <div class="tl-title">
+                              <span class="ico">{{ cat_icons.get(r.get('cat1') or '', '📍') }}</span>
+                              {{ r.get('title') }}
+                            </div>
+                            <div class="tl-body">
+                              <div class="addr">{{ r.get('addr1') }}</div>
+                              <div class="tags">
+                                {% if r.get('cat1') %}<span class="chip">{{ r.get('cat1') }}</span>{% endif %}
+                                {% if r.get('cat3') %}<span class="chip ghost">{{ r.get('cat3') }}</span>{% endif %}
+                              </div>
+                            </div>
+                            <div class="tl-meta">
+                              {% if r.get('move_min') and r.get('move_min') > 0 %}<span class="pill">이동 {{ r.get('move_min') }}분</span>{% endif %}
+                              {% if r.get('stay_min') %}<span class="pill">체류 {{ r.get('stay_min') }}분</span>{% endif %}
+                              {% if r.get('distance_from_prev_km') %}<span class="pill">{{ r.get('distance_from_prev_km') }} km</span>{% endif %}
+                            </div>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </section>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="hint">표시할 데이터가 없습니다.</div>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- 실행중 오버레이 -->
+      {% if state == '실행중' %}
+        <div class="chat-loading">
+          <div class="spinner big"></div>
+          <div class="hint mt-2">일정 생성 중입니다…</div>
+        </div>
+      {% endif %}
+    </section>
+
+    <!-- 입력 바: 지역 단계에서만 노출 -->
+    {% if state == '지역' %}
+      <form class="input-bar" method="post" action="{{ url_for('chat') }}">
+        <input class="chat-input" type="text" name="region" placeholder="예) 서울, 부산, 제주…" required />
+        <button class="send-btn" type="submit" aria-label="보내기">
+          <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+        </button>
+      </form>
+    {% endif %}
+  </main>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
