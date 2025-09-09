@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=2" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=4" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -12,12 +12,11 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="home-btn" href="{{ url_for('home') }}" aria-label="홈페이지로 가기">🏠 홈페이지</a>
-      <a class="logo" href="{{ url_for('home') }}" aria-label="홈으로" title="홈으로" style="text-decoration:none;color:inherit">
-        <span class="dot"></span>
-        <strong>채채</strong>
+      <a class="logo" href="{{ url_for('home') }}">
+        <span class="dot"></span><strong>채채</strong>
       </a>
       <div class="topbar-actions">
-        {% if state != '지역' %}
+        {% if session.get('messages', [])|length > 1 %}
           <a class="home-btn ghost" href="{{ url_for('go_back') }}">뒤로 가기</a>
         {% endif %}
         <a class="home-btn" href="{{ url_for('reset_chat') }}">새로 시작</a>
@@ -27,313 +26,206 @@
 
   <main class="chat-page">
     <section id="chat-window" class="chat-window" data-state="{{ state }}">
-      <!-- Messages are dynamically loaded or rendered by Flask -->
       {% for msg in session.get('messages', []) %}
-        <div class="msg {{ 'user' if msg['sender'] == 'user' else 'bot' }}">
+        <div class="msg {{ 'user' if msg.sender == 'user' else 'bot' }}">
           <div class="bubble">
-            {% if msg.get('html') %}{{ msg['html']|safe }}{% else %}{{ msg['text'] }}{% endif %}
+            {% if msg.html %}{{ msg.html|safe }}{% else %}{{ msg.text }}{% endif %}
           </div>
         </div>
       {% endfor %}
 
-      <!-- Renders input UI based on the current state -->
-      {% if state == '지역' %}
-        <div class="msg bot"><div class="bubble">안녕하세요! 😊<br /><b>어떤 지역</b>으로 여행 가실 건가요?</div></div>
-      {% elif state == '점수' %}
-        <!-- Score selection UI -->
-      {% elif state == '테마' %}
-        <!-- Theme selection UI -->
-      {% elif state == '기간' %}
-        <!-- Date range selection UI -->
-      {% elif state == '이동수단' %}
-        <!-- Transport mode selection UI -->
-      {% elif state == '완료' %}
-        <div class="msg bot">
-          <div class="bubble">
-            <b>추천 일정이 준비됐어요!</b> Day 카드로 정리했습니다. ✨
-
-            {% set itin = session.get('itinerary', []) %}
-            {% if itin and itin|length > 0 %}
-              {% set groups = (itin|groupby('day'))|list %}
-              {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️'} %}
-
-              <div class="day-stack">
-                {% for day, rows in groups %}
-                  {% set rows = rows|list %}
-                  {% set day_label = (rows[0].get('day_label') or (day ~ '일차')) %}
-                  
-                  <section class="day-card" data-day="{{ day }}" aria-label="{{ day_label }}">
-                    <header class="day-card-header">
-                      <div class="left"><span class="day-chip">{{ day_label }}</span></div>
-                    </header>
-
-                    <ol class="timeline">
-                      {% for r in rows %}
-                        {% set is_move = (r.get('title') == '이동') %}
-                        <li class="tl-item {{ 'move' if is_move else 'visit' }}"
-                            {% if not is_move %}
-                              data-title="{{ r.get('title') }}"
-                              data-addr1="{{ r.get('addr1') }}"
-                            {% endif %}>
-                          
-                          <div class="tl-content-wrapper">
-                              <div class="tl-text-content">
-                                <div class="tl-time">{{ r.get('start_time') }} – {{ r.get('end_time') }}</div>
-                                <!-- Text content for visit/move -->
-                                {% if not is_move %}
-                                  <h4 class="tl-title">
-                                    <span class="ico">{{ cat_icons.get(r.get('cat1') or '', '📍') }}</span>
-                                    {{ r.get('title') }}
-                                  </h4>
-                                  <div class="tl-body">
-                                    <div class="addr">{{ r.get('addr1') }}</div>
-                                    <div class="tags">
-                                      {% if r.get('cat1') %}<span class="chip">{{ r.get('cat1') }}</span>{% endif %}
-                                      {% if r.get('cat3') %}<span class="chip ghost">{{ r.get('cat3') }}</span>{% endif %}
-                                    </div>
-                                  </div>
-                                {% else %}
-                                   <h4 class="tl-title">🚇 이동</h4>
-                                {% endif %}
-                              </div>
-
-                              {% if not is_move %}
-                              <div class="tl-media-content">
-                                <div class="media-carousel-container">
-                                  <div class="media-loading"><span>📷 이미지 로딩중...</span></div>
-                                </div>
-                                <div id="map-{{ day }}-{{ loop.index }}" class="kakao-map-container">
-                                   <div class="media-loading"><span>🗺️ 지도 로딩중...</span></div>
-                                </div>
-                              </div>
-                              {% endif %}
+      {% if state == '완료' and session.get('itinerary') %}
+        {% set itin = session.get('itinerary', []) %}
+        {% set groups = (itin|groupby('day'))|list %}
+        {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️'} %}
+        <div class="day-stack">
+          {% for day, rows in groups %}
+            {% set rows = rows|list %}
+            {% set day_label = (rows[0].get('day_label') or (day ~ '일차')) %}
+            <section class="day-card" data-day="{{ day }}">
+              <header class="day-card-header"><div class="day-chip">{{ day_label }}</div></header>
+              <ol class="timeline">
+                {% for r in rows %}
+                  {% set is_move = (r.title == '이동') %}
+                  <li class="tl-item {{ 'move' if is_move else 'visit' }}"
+                      {% if not is_move %}
+                        data-title="{{ r.title }}"
+                        data-addr1="{{ r.addr1 }}"
+                      {% endif %}>
+                    <div class="tl-content-wrapper">
+                      <div class="tl-text-content">
+                        <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
+                        {% if not is_move %}
+                          <h4 class="tl-title"><span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>{{ r.title }}</h4>
+                          <div class="addr">{{ r.addr1 }}</div>
+                          <div class="tags">
+                            {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
+                            {% if r.cat3 %}<span class="chip ghost">{{ r.cat3 }}</span>{% endif %}
                           </div>
-                        </li>
-                      {% endfor %}
-                    </ol>
-                  </section>
+                        {% else %}
+                          <h4 class="tl-title">🚇 이동</h4>
+                          <div class="move-details">
+                            {% if r.교통편1 or r.교통편2 %}
+                              <span class="chip ghost small">{{ r.교통편1 }}</span>
+                              <span class="chip ghost small">{{ r.교통편2 }}</span>
+                            {% else %}
+                              <span>{{ r.출발지 }} → {{ r.도착지 }}</span>
+                            {% endif %}
+                          </div>
+                        {% endif %}
+                      </div>
+                      {% if not is_move %}
+                      <div class="tl-media-content">
+                        <div class="media-carousel-container"><div class="media-loading">📷</div></div>
+                        <div class="kakao-map-container"><div class="media-loading">🗺️</div></div>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </li>
                 {% endfor %}
-              </div>
-            {% else %}
-              <div class="hint">표시할 데이터가 없습니다.</div>
-            {% endif %}
-          </div>
+              </ol>
+            </section>
+          {% endfor %}
         </div>
       {% endif %}
     </section>
 
-    {% if state == '지역' %}
-      <form class="input-bar" method="post" action="{{ url_for('chat') }}">
-        <input class="chat-input" type="text" name="region" placeholder="예) 서울, 부산, 제주…" required autofocus />
-        <button class="send-btn" type="submit" aria-label="보내기">
-          <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-        </button>
-      </form>
-    {% endif %}
+    <div class="input-area">
+      {% if state == '지역' %}
+        <form class="input-bar" method="post" action="{{ url_for('chat') }}">
+          <input class="chat-input" type="text" name="region" placeholder="예) 서울, 부산, 제주…" required autofocus />
+          <button class="send-btn" type="submit" aria-label="보내기">
+            <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+          </button>
+        </form>
+
+      {% elif state == '점수' %}
+        <div class="button-wrap">
+          <button type="button" class="score-btn theme-btn" data-value="관광지수"><span class="icon">🗺️</span><span class="label">관광지수</span></button>
+          <button type="button" class="score-btn theme-btn" data-value="인기도지수"><span class="icon">🔥</span><span class="label">인기도지수</span></button>
+        </div>
+        <form id="scoreForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="score" id="scoreInput" /></form>
+
+      {% elif state == '테마' %}
+        {% set themes = [{'v': '자연', 'l': '자연', 'i': '🌳'}, {'v': '레포츠', 'l': '레포츠', 'i': '🏃'}, {'v': '쇼핑', 'l': '쇼핑', 'i': '🛍️'}, {'v': '음식', 'l': '음식', 'i': '🍽️'}, {'v': '인문(문화/예술/역사)', 'l': '문화', 'i': '🎭'}] %}
+        <div class="button-wrap wide">
+          {% for t in themes %}
+            <button type="button" class="theme-btn" data-value="{{ t.v }}"><span class="icon">{{ t.i }}</span><span class="label">{{ t.l }}</span></button>
+          {% endfor %}
+        </div>
+        <div class="theme-actions">
+          <button id="themeClear" type="button" class="ghost-btn small">초기화</button>
+          <button id="themeSubmit" type="button" class="primary-btn small" disabled>선택 완료 (0/3)</button>
+        </div>
+        <form id="themeForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="themes" id="themesInput" /></form>
+
+      {% elif state == '기간' %}
+        <form id="rangeForm" class="range-form" method="post" action="{{ url_for('chat') }}">
+          <div class="date-row">
+            <div class="date-box"><label for="startDate">시작</label><div class="date-field"><input id="startDate" name="start_date" type="date" /><button id="openStart" type="button">📅</button></div></div>
+            <span class="date-tilde">~</span>
+            <div class="date-box"><label for="endDate">종료</label><div class="date-field"><input id="endDate" name="end_date" type="date" /><button id="openEnd" type="button">📅</button></div></div>
+          </div>
+          <div class="range-actions">
+            <div class="days-pill">총 <span id="daysPreview">—</span></div>
+            <button id="rangeSubmit" type="submit" class="primary-btn small" disabled>확인</button>
+          </div>
+        </form>
+
+      {% elif state == '이동수단' %}
+        <div class="button-wrap">
+          <button type="button" class="transport-btn theme-btn" data-value="walk"><span class="icon">🚶</span><span class="label">걷기</span></button>
+          <button type="button" class="transport-btn theme-btn" data-value="transit"><span class="icon">🚋</span><span class="label">대중교통</span></button>
+        </div>
+        <form id="transportForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="transport" id="transportInput" /></form>
+
+      {% endif %}
+    </div>
   </main>
 
-  <noscript>
-    <div style="text-align:center; padding: 20px; color: #b91c1c;">
-      이 페이지의 전체 기능을 이용하려면 자바스크립트를 활성화해야 합니다.
-    </div>
-  </noscript>
-
-  <!-- Load step-by-step interaction logic -->
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-
-  <!-- Kakao Maps SDK (only if key is provided) -->
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=3"></script>
+  
   {% if kakao_js_key %}
   <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&libraries=services"></script>
   {% endif %}
 
-  <!-- Logic for rendering results (maps and images) -->
   <script>
-  document.addEventListener('DOMContentLoaded', () => {
-    // Only run this script on the results page
-    const chatWindow = document.getElementById('chat-window');
-    if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) {
-      return;
-    }
-    window.resultsRendererInitialized = true;
-
-    const DATA_CACHE = new Map();
-
-    // Handles image loading errors
-    window.handleImgError = function(e) {
-      const img = e.target;
-      const slide = img.closest('.carousel-slide');
-      const carousel = img.closest('.carousel');
-      if (!carousel || !slide) return;
-      
-      slide.remove(); // Remove the broken image slide
-      
-      const slides = carousel.querySelectorAll('.carousel-slide');
-      if (slides.length === 0) {
-        // If no images are left, show a placeholder
-        const carouselContainer = carousel.closest('.media-carousel-container');
-        if (carouselContainer) {
-           carouselContainer.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>';
-        }
-        return;
+    document.addEventListener('DOMContentLoaded', () => {
+      const chatWindow = document.getElementById('chat-window');
+      if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
+      window.resultsRendererInitialized = true;
+      const DATA_CACHE = new Map();
+      async function fetchPlaceData(title, addr) {
+        const key = `${title}|${addr}`;
+        if (DATA_CACHE.has(key)) return DATA_CACHE.get(key);
+        try {
+          const [imgRes, geoRes] = await Promise.all([
+            fetch(`/api/places?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr)}`),
+            fetch(`/api/geocode?title=${encodeURIComponent(title)}&addr=${encodeURIComponent(addr)}`)
+          ]);
+          const imgData = await imgRes.json(), geoData = await geoRes.json();
+          const images = (imgData.ok && imgData.items[0]) ? imgData.items[0].images : [];
+          const coords = geoData.ok ? geoData.result : null;
+          const result = { images, coords };
+          DATA_CACHE.set(key, result);
+          return result;
+        } catch (error) { return { images: [], coords: null }; }
       }
-      
-      carousel.dataset.count = slides.length;
-      updateCarouselState(carousel, 0); // Reset to the first slide
-    };
-
-    // Fetches image URLs and geocoded coordinates for a place
-    async function fetchPlaceData(title, addr) {
-      const key = `${title}|${addr}`;
-      if (DATA_CACHE.has(key)) return DATA_CACHE.get(key);
-
-      try {
-        // Fetch images and geocode data in parallel for speed
-        const [imgRes, geoRes] = await Promise.all([
-          fetch(`/api/places?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr)}`),
-          fetch(`/api/geocode?title=${encodeURIComponent(title)}&addr=${encodeURIComponent(addr)}`)
-        ]);
-
-        const imgData = await imgRes.json();
-        const geoData = await geoRes.json();
-
-        const images = (imgData.ok && imgData.items.length > 0) ? imgData.items[0].images : [];
-        const coords = (geoData.ok) ? geoData.result : null;
-
-        const result = { images, coords };
-        DATA_CACHE.set(key, result);
-        return result;
-      } catch (error) {
-        console.error(`Data fetch failed for '${title}':`, error);
-        return { images: [], coords: null };
+      function updateCarouselState(carousel, newIndex) {
+          const track = carousel.querySelector('.slides-track'), dots = carousel.querySelectorAll('.dots .dot');
+          const prevBtn = carousel.querySelector('.cbtn.prev'), nextBtn = carousel.querySelector('.cbtn.next');
+          const count = parseInt(carousel.dataset.count, 10) || 0;
+          if (count === 0 || !track) return;
+          const index = Math.max(0, Math.min(newIndex, count - 1));
+          carousel.dataset.slide = index;
+          track.style.transform = `translateX(-${index * 100}%)`;
+          dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+          if (prevBtn) prevBtn.hidden = (index <= 0);
+          if (nextBtn) nextBtn.hidden = (index >= count - 1);
       }
-    }
-
-    // Updates carousel UI (slide position, dots, arrows)
-    function updateCarouselState(carousel, newIndex) {
-        const slidesTrack = carousel.querySelector('.slides-track');
-        const dots = carousel.querySelectorAll('.dots .dot');
-        const prevBtn = carousel.querySelector('.cbtn.prev');
-        const nextBtn = carousel.querySelector('.cbtn.next');
-        const count = parseInt(carousel.dataset.count, 10) || 0;
-
-        if (count === 0 || !slidesTrack) return;
-        
-        const index = Math.max(0, Math.min(newIndex, count - 1));
-
-        carousel.dataset.slide = index;
-        slidesTrack.style.transform = `translateX(-${index * 100}%)`;
-
-        dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
-        if (prevBtn) prevBtn.hidden = (index <= 0);
-        if (nextBtn) nextBtn.hidden = (index >= count - 1);
-    }
-    
-    // Creates and injects carousel HTML into the container
-    function setupCarousel(container, images) {
-        if (!images || images.length === 0) {
-            container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>';
-            return;
-        }
-
-        const count = images.length;
-        const slidesHtml = images.map(src => `
-            <div class="carousel-slide">
-                <img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)">
-            </div>
-        `).join('');
-
-        const dotsHtml = count > 1 ? `<div class="dots">${Array.from({ length: count }, (_, i) => `<button type="button" class="dot" data-i="${i}"></button>`).join('')}</div>` : '';
-        const buttonsHtml = count > 1 ? `
-            <button class="cbtn prev" type="button" aria-label="이전">‹</button>
-            <button class="cbtn next" type="button" aria-label="다음">›</button>
-        ` : '';
-
-        container.innerHTML = `
-            <div class="carousel" data-slide="0" data-count="${count}">
-                ${buttonsHtml}
-                <div class="slides-container"><div class="slides-track">${slidesHtml}</div></div>
-                ${dotsHtml}
-            </div>`;
-
-        const carousel = container.querySelector('.carousel');
-        updateCarouselState(carousel, 0);
-
-        // Add event listeners for carousel controls
-        carousel.addEventListener('click', (e) => {
-            const target = e.target;
-            let currentIndex = parseInt(carousel.dataset.slide || '0', 10);
-            
-            if (target.closest('.cbtn.next')) updateCarouselState(carousel, currentIndex + 1);
-            else if (target.closest('.cbtn.prev')) updateCarouselState(carousel, currentIndex - 1);
-            else if (target.matches('.dot')) updateCarouselState(carousel, parseInt(target.dataset.i, 10));
-        });
-    }
-
-    // Creates and injects a Kakao Map into the container
-    function setupMap(container, coords, title) {
-        if (!window.kakao || !window.kakao.maps) {
-          container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>'; return;
-        }
-        if (!coords || !coords.y || !coords.x) {
-            container.innerHTML = '<div class="no-map-placeholder">위치 정보 없음</div>'; return;
-        }
-        
-        container.innerHTML = ''; // Clear loading placeholder
-        const position = new kakao.maps.LatLng(coords.y, coords.x);
-        const map = new kakao.maps.Map(container, { center: position, level: 4 });
-        const marker = new kakao.maps.Marker({ map: map, position: position });
-
-        const infoWindow = new kakao.maps.InfoWindow({
-            content: `<div style="padding:5px;font-size:12px;text-align:center;">${title}</div>`,
-            removable: true
-        });
-        
-        kakao.maps.event.addListener(marker, 'click', () => infoWindow.open(map, marker));
-        
-        // Ensure map resizes correctly within the flex container
-        setTimeout(() => map.relayout(), 100);
-    }
-    
-    // Main function to initialize all visit items on the page
-    async function initializeAllVisitItems() {
-        const visitItems = document.querySelectorAll('li.tl-item.visit');
-        if (visitItems.length === 0) return;
-        
-        const promises = Array.from(visitItems).map(item => {
-            const title = item.dataset.title;
-            const addr = item.dataset.addr1;
-            if (!title || !addr) return Promise.resolve(null);
-            return fetchPlaceData(title, addr);
-        });
-        
-        const results = await Promise.all(promises);
-
-        visitItems.forEach((item, index) => {
-            const data = results[index];
-            if (!data) return;
-
+      function setupCarousel(container, images) {
+          if (!images || images.length === 0) { container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>'; return; }
+          const count = images.length;
+          const slidesHtml = images.map(src => `<div class="carousel-slide"><img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer"></div>`).join('');
+          const dotsHtml = count > 1 ? `<div class="dots">${Array.from({ length: count }, (_, i) => `<button type="button" class="dot" data-i="${i}"></button>`).join('')}</div>` : '';
+          const buttonsHtml = count > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
+          container.innerHTML = `<div class="carousel" data-slide="0" data-count="${count}">${buttonsHtml}<div class="slides-container"><div class="slides-track">${slidesHtml}</div></div>${dotsHtml}</div>`;
+          const carousel = container.querySelector('.carousel');
+          updateCarouselState(carousel, 0);
+          carousel.addEventListener('click', (e) => {
+              const target = e.target;
+              let currentIndex = parseInt(carousel.dataset.slide || '0', 10);
+              if (target.closest('.cbtn.next')) updateCarouselState(carousel, currentIndex + 1);
+              else if (target.closest('.cbtn.prev')) updateCarouselState(carousel, currentIndex - 1);
+              else if (target.matches('.dot')) updateCarouselState(carousel, parseInt(target.dataset.i, 10));
+          });
+      }
+      function setupMap(container, coords, title) {
+          if (!window.kakao || !window.kakao.maps) { container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>'; return; }
+          if (!coords || !coords.y || !coords.x) { container.innerHTML = '<div class="no-map-placeholder">위치 정보 없음</div>'; return; }
+          container.innerHTML = '';
+          const position = new kakao.maps.LatLng(coords.y, coords.x);
+          const map = new kakao.maps.Map(container, { center: position, level: 4 });
+          new kakao.maps.Marker({ map: map, position: position });
+          setTimeout(() => map.relayout(), 50);
+      }
+      async function initializeAllVisitItems() {
+          const visitItems = document.querySelectorAll('li.tl-item.visit');
+          for(const item of visitItems) {
+            const data = await fetchPlaceData(item.dataset.title, item.dataset.addr1);
+            if (!data) continue;
             const carouselContainer = item.querySelector('.media-carousel-container');
             const mapContainer = item.querySelector('.kakao-map-container');
-            const title = item.dataset.title;
-
             if (carouselContainer) setupCarousel(carouselContainer, data.images);
-            if (mapContainer) setupMap(mapContainer, data.coords, title);
-        });
-    }
-
-    // Execute after Kakao Maps SDK is fully loaded
-    if (window.kakao && window.kakao.maps) {
-        kakao.maps.load(initializeAllVisitItems);
-    } else {
-        // Fallback if the SDK script tag is missing or fails
-        const mapContainers = document.querySelectorAll('.kakao-map-container');
-        mapContainers.forEach(container => {
-           container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>';
-        });
-        // Still try to load images
-        initializeAllVisitItems();
-    }
-  });
+            if (mapContainer) setupMap(mapContainer, data.coords, item.dataset.title);
+          }
+      }
+      if (window.kakao && window.kakao.maps) {
+          kakao.maps.load(initializeAllVisitItems);
+      } else if (document.querySelector('.kakao-map-container')) {
+          initializeAllVisitItems();
+      }
+    });
   </script>
 </body>
 </html>

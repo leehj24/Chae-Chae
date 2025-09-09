@@ -1,10 +1,12 @@
+# app.py
+
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json
 import math
 import traceback
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -52,6 +54,17 @@ app.config.update(
 Path(app.config["SESSION_FILE_DIR"]).mkdir(parents=True, exist_ok=True)
 Session(app)
 
+
+# ---------- Bot's Questions ----------
+BOT_PROMPTS = {
+    "지역": "안녕하세요! 😊<br /><b>어떤 지역</b>으로 여행 가실 건가요?",
+    "점수": "어떤 기준으로 추천할까요? <b>관광지수 vs 인기도지수</b><br />하나만 선택해 주세요.",
+    "테마": "좋아요! 이제 <b>원하는 테마를 최대 3개</b>까지 골라주세요.",
+    "기간": "<b>여행 기간</b>을 선택해 주세요. 시작~종료 날짜를 고르면 <em>총 일수</em>가 자동 계산돼요.",
+    "이동수단": "마지막으로, <b>어떤 이동수단</b>으로 맞출까요?",
+    "실행중": "<div class='spinner'></div>모든 정보를 확인했어요.<br>이제 최적의 여행 경로를 만들고 있어요. 잠시만 기다려 주세요!",
+}
+
 # ---------- Common Utilities ----------
 MAX_MSGS = 30
 
@@ -78,8 +91,11 @@ def _nfc(s: str) -> str:
     return ud.normalize("NFC", str(s or "")).strip()
 
 def _init_session_if_needed():
-    session.setdefault("state", "지역")
-    session.setdefault("messages", [])
+    if "state" not in session:
+        session["state"] = "지역"
+    if "messages" not in session or not session["messages"]:
+        session["messages"] = [{"sender": "bot", "html": BOT_PROMPTS["지역"]}]
+
 
 # ─────────────────────────────────────────
 # CSV Loading & Caching
@@ -192,27 +208,15 @@ def _kakao_image_search(query: str, size: int = 4) -> List[str]:
         return [u for u in urls if len(u) < 2000]
     except Exception: return []
 
-# ✅ FASTER VERSION of image fetching
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
-    """
-    Directly fetches images from Kakao API without server-side validation.
-    This is much faster. The browser will handle any broken image links.
-    """
     cache = _load_image_cache()
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-    
-    # Check cache first
     if key in cache:
         return cache[key].get("urls", [])[:max_n]
-
-    # If not in cache, call the API
     q = " ".join([_nfc(title), *_addr_region_tokens(addr1)])
     urls = _kakao_image_search(q, size=max_n)
-    
-    # Save to cache and return
     cache[key] = {"q": q, "urls": urls, "ts": int(datetime.now().timestamp())}
     _save_image_cache()
-    
     return urls
 
 def _kakao_geocode(query: str, addr1: str = "") -> Dict[str, Any] | None:
@@ -243,14 +247,104 @@ def home():
 @app.get("/chat")
 def index():
     _init_session_if_needed()
-    kakao_js_key = KAKAO_JS_KEY
-    return render_template("index.html", kakao_js_key=kakao_js_key)
+    return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
 
 @app.post("/chat")
 def chat():
-    # This route handles the step-by-step chat form submissions
-    # ... (existing form handling logic) ...
+    _init_session_if_needed()
+    state = session.get("state")
+    messages = session.get("messages", [])
+
+    if state == "지역":
+        region = request.form.get("region", "").strip()
+        if region:
+            session["region"] = region
+            messages.append({"sender": "user", "text": region})
+            messages.append({"sender": "bot", "html": BOT_PROMPTS["점수"]})
+            session["state"] = "점수"
+
+    elif state == "점수":
+        score = request.form.get("score", "").strip()
+        if score in {"관광지수", "인기도지수"}:
+            session["score_label"] = score
+            messages.append({"sender": "user", "text": score})
+            messages.append({"sender": "bot", "html": BOT_PROMPTS["테마"]})
+            session["state"] = "테마"
+
+    elif state == "테마":
+        themes_str = request.form.get("themes", "").strip()
+        if themes_str:
+            themes = [t.strip() for t in themes_str.split(",") if t.strip()]
+            session["cats"] = themes
+            messages.append({"sender": "user", "text": ", ".join(themes)})
+            messages.append({"sender": "bot", "html": BOT_PROMPTS["기간"]})
+            session["state"] = "기간"
+
+    elif state == "기간":
+        start_date_str = request.form.get("start_date")
+        end_date_str = request.form.get("end_date")
+        try:
+            start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            days = (end - start).days + 1
+            if 1 <= days <= 100:
+                session["days"] = days
+                user_text = f"{start_date_str} ~ {end_date_str} (총 {days}일)"
+                messages.append({"sender": "user", "text": user_text})
+                messages.append({"sender": "bot", "html": BOT_PROMPTS["이동수단"]})
+                session["state"] = "이동수단"
+        except (ValueError, TypeError):
+            pass
+
+    elif state == "이동수단":
+        transport = request.form.get("transport", "").strip()
+        if transport in {"walk", "transit"}:
+            session["transport_mode"] = transport
+            transport_text = "걷기" if transport == "walk" else "대중교통"
+            messages.append({"sender": "user", "text": transport_text})
+            messages.append({"sender": "bot", "html": BOT_PROMPTS["실행중"]})
+            session["state"] = "실행중"
+    
+    session["messages"] = messages
+    _trim_msgs()
     return redirect(url_for("index"))
+
+@app.post("/do_generate")
+def do_generate():
+    """AJAX endpoint to run the recommendation engine."""
+    try:
+        params = {
+            "region": session.get("region"),
+            "score_label": session.get("score_label"),
+            "cats": session.get("cats"),
+            "days": session.get("days"),
+            "transport_mode": session.get("transport_mode"),
+        }
+        
+        if not all(params.values()):
+            raise ValueError("필수 입력값이 누락되었습니다.")
+
+        engine = run_walk_module if params["transport_mode"] == "walk" else run_transit_module
+        itinerary_df = engine.run(**params)
+        
+        session["itinerary"] = _df_to_records(itinerary_df)
+        session["state"] = "완료"
+        session["messages"].append({
+            "sender": "bot",
+            "html": "완료! 추천 일정을 아래에 표시했어요."
+        })
+        return _json({"ok": True})
+
+    except Exception as e:
+        trace = traceback.format_exc(limit=4)
+        print(f"Generation Error: {e}\n{trace}")
+        session["state"] = "오류"
+        session["messages"].append({
+            "sender": "bot",
+            "html": f"<strong>오류 발생:</strong><br><pre>{e}</pre>"
+        })
+        return _json({"ok": False, "error": str(e)}, 500)
+
 
 @app.get("/reset_chat")
 def reset_chat():
@@ -259,39 +353,33 @@ def reset_chat():
 
 @app.get("/go_back")
 def go_back():
-    """Navigates to the previous state in the chat conversation."""
     _init_session_if_needed()
     current_state = session.get("state")
 
-    # Defines the conversation flow and what data to clear when going back
     state_flow = {
-        "점수": {"prev": "지역", "clear": ["region"]},
-        "테마": {"prev": "점수", "clear": ["score_label"]},
-        "기간": {"prev": "테마", "clear": ["cats"]},
-        "이동수단": {"prev": "기간", "clear": ["days", "start_date", "end_date"]},
-        "실행중": {"prev": "이동수단", "clear": ["transport_mode", "pending_job"]},
-        "완료": {"prev": "이동수단", "clear": ["transport_mode", "itinerary", "columns"]},
+        "점수": {"prev": "지역"},
+        "테마": {"prev": "점수"},
+        "기간": {"prev": "테마"},
+        "이동수단": {"prev": "기간"},
+        "실행중": {"prev": "이동수단"},
+        "완료": {"prev": "이동수단"},
+        "오류": {"prev": "이동수단"},
     }
 
     if current_state in state_flow:
-        config = state_flow[current_state]
-        prev_state = config["prev"]
-        
-        for key in config["clear"]:
-            session.pop(key, None)
-            
+        # Go back 2 messages (user's answer + bot's question)
         messages = session.get("messages", [])
-        if messages and len(messages) >= 2:
-             session["messages"] = messages[:-2]
-
-        session["state"] = prev_state
+        if len(messages) >= 2:
+            session["messages"] = messages[:-2]
+        
+        session["state"] = state_flow[current_state]["prev"]
     else:
-        session["state"] = "지역"
-        session["messages"] = []
+        session.clear() # Fallback
 
     return redirect(url_for("index"))
 
 
+# ... (API Endpoints: /api/places, /api/geocode, /img-proxy remain unchanged) ...
 # ─────────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────────
@@ -371,7 +459,6 @@ def img_proxy():
     except requests.exceptions.RequestException:
         return abort(502)
 
-# ... other routes like /do_generate remain ...
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -1,3 +1,4 @@
+/* static/css/style.css */
 :root{
   /* Light theme palette for chat */
   --bg:#f6f9ff; --panel:#ffffff; --panel-2:#f9fbff; --text:#0f172a;
@@ -12,15 +13,13 @@
   --input-placeholder:#6b7280;
 }
 
-/* Basic Layout */
+/* Layout */
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0; color:var(--text);
   font-family:-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard Variable", Pretendard, Roboto, "Noto Sans KR", "Segoe UI", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
-  background: linear-gradient(90deg, rgba(59,130,246,.14) 0%, #ffffff 50%, rgba(59,130,246,.14) 100%);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
+  background: var(--bg);
 }
 
 /* Top bar */
@@ -30,60 +29,56 @@ body{
   border-bottom:1px solid #e9eef7;
 }
 .topbar-inner{
-  max-width:960px; margin:0 auto; padding:12px 16px;
+  max-width:960px; margin:0 auto; padding:0 16px; height: var(--topbar-h);
   display:flex; align-items:center; justify-content:space-between;
 }
-.logo{display:flex; gap:10px; align-items:center; font-weight: 800;}
+.logo{display:flex; gap:10px; align-items:center; font-weight: 800; text-decoration: none; color: inherit;}
 .logo .dot{width:8px; height:8px; border-radius:50%; background:var(--brand); box-shadow:0 0 18px rgba(59,130,246,.7)}
+.topbar-actions{ display:flex; gap: 8px; }
 .home-btn{
   all:unset; box-sizing: border-box; cursor:pointer; padding:8px 12px; border-radius:999px;
-  border:1px solid var(--border); color:var(--text); font-weight: 600;
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
-  text-decoration: none;
+  border:1px solid var(--border); color:var(--text); font-weight: 600; font-size: 0.9rem;
+  background:linear-gradient(180deg,#ffffff,#f6f9ff); text-decoration: none;
+  transition: all 0.15s ease-out;
 }
 .home-btn:hover{ transform:translateY(-1px); border-color:#cdd7ee }
+.home-btn.ghost{ background: transparent; }
 
-/* Main Chat Page Layout */
+/* Page Layout: Natural Flow */
 .chat-page{
   max-width:960px; margin:0 auto;
-  padding:18px 16px 16px;
-  min-height:calc(100svh - var(--topbar-h));
-  display:flex; flex-direction:column;
+  padding: 18px 16px 40px; /* Add bottom padding for spacing */
 }
 
 /* Chat window */
 .chat-window{
-  flex-grow: 1;
-  border:1px solid var(--border); border-radius:16px; padding:12px;
-  background:linear-gradient(180deg,#ffffff,#f7faff); box-shadow:var(--shadow);
-  overflow-y:auto;
+  padding: 0 16px; /* 좌우 패딩만 적용 */
+  overflow-y:visible; /* Allow content to flow naturally */
 }
 
 /* Messages */
-.msg{ display:flex; margin:8px 0; }
+.msg{ display:flex; margin-bottom: 12px; }
 .msg.bot{ justify-content:flex-start }
 .msg.user{ justify-content:flex-end }
-
 .bubble{
-  display:inline-block; max-width:78%;
-  padding:10px 14px; border-radius:16px;
-  font-size:1rem; line-height:1.5;
-  border:1px solid var(--border);
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
-  box-shadow:0 8px 18px rgba(15,23,42,.06);
+  display:inline-block; max-width:85%; padding:10px 16px; border-radius:18px;
+  font-size:1rem; line-height:1.6; border:1px solid var(--border);
+  background:var(--panel);
+  box-shadow:0 4px 12px rgba(15,23,42,.05);
   word-wrap:break-word; word-break:keep-all; color:#0f172a;
 }
 .msg.user .bubble{
-  background:linear-gradient(180deg,#f2f7ff,#e7f0ff);
-  border-color:#cfe0ff;
+  background: var(--brand);
+  color: #ffffff;
+  border-color: transparent;
 }
 
-/* Input bar */
-.input-bar{
-  margin-top:10px; display:flex; gap:8px;
-  padding:10px; border:1px solid var(--border); border-radius:14px;
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
+/* Input Area styles: No background, just a simple container */
+.input-area {
+  padding: 12px 16px; /* ✅ 수정: 좌우 패딩을 chat-window와 동일하게 맞춤 */
+  margin-top: 10px;
 }
+.input-bar{ display:flex; gap:8px; }
 .chat-input{
   flex:1; min-width:0; padding:12px 14px; border-radius:10px; border:1px solid var(--border);
   background:var(--input-bg-active); color:var(--input-fg-active); outline:none; font-size: 1rem;
@@ -95,174 +90,88 @@ body{
 }
 .send-btn svg{ width:24px; height:24px; fill:#0f172a }
 
-
-/* ─────────────────────────────────────────────
-   Timeline & Results Styles
-   ───────────────────────────────────────────── */
-.day-stack{ display:grid; gap:16px; margin-top:12px; }
-.day-card{
-  border:1px solid var(--border); border-radius:16px;
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
-  box-shadow:var(--shadow); padding:16px;
+/* Buttons in input-area */
+.button-wrap { display:flex; flex-wrap:wrap; gap:10px; justify-content: flex-start; }
+.button-wrap.wide { max-width: 600px; }
+.theme-btn, .score-btn, .transport-btn {
+  all:unset; box-sizing:border-box; cursor:pointer; display:flex; align-items:center; gap:8px;
+  padding:10px 14px; border:1px solid var(--border); border-radius:999px;
+  background:var(--panel); font-weight:700;
+  transition: all 0.15s ease-out;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .05);
 }
-.day-card-header{
-  border-bottom:1px solid #e8eef9; padding-bottom:10px; margin-bottom:12px;
+.theme-btn:hover, .score-btn:hover, .transport-btn:hover {
+  transform: translateY(-1px);
+  border-color: #cdd7ee;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, .08);
 }
-.day-chip{
-  display:inline-block; padding:8px 14px; border-radius:999px;
+.theme-btn.selected, .score-btn.selected, .transport-btn.selected {
+  border-color:#cfe0ff;
   background:linear-gradient(180deg,#f2f7ff,#e7f0ff);
-  border:1px solid #cfe0ff; font-weight:700; font-size: 1.1rem; color:#0f172a;
 }
-.timeline{ list-style:none; margin:0; padding:0; }
+.theme-btn .icon, .score-btn .icon, .transport-btn .icon { font-size:1.2rem; }
+.theme-actions{ margin-top:12px; display:flex; gap:8px; justify-content: flex-start; }
+.primary-btn.small, .ghost-btn.small { padding: 8px 12px; font-size: 0.9rem; font-weight: 700; border-radius: 10px; }
+.primary-btn{ all:unset; box-sizing:border-box; cursor:pointer; border:1px solid #cfe0ff; background:linear-gradient(180deg,#f2f7ff,#e7f0ff); }
+.primary-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+.ghost-btn{ all:unset; box-sizing:border-box; cursor:pointer; border:1px solid var(--border); background:var(--panel); }
 
+/* Date Range Form */
+.range-form { max-width: 600px; }
+.date-row{ display:flex; flex-wrap:wrap; align-items:center; justify-content: flex-start; gap:10px; }
+.date-box{ display:flex; flex-direction:column; gap:4px; }
+.date-box label{ font-size:0.85rem; font-weight:600; padding-left:4px; color:var(--muted); }
+.date-field{ display:flex; align-items:center; border:1px solid var(--border); border-radius:10px; background:var(--panel); }
+.date-field input{ border:none; background:transparent; padding:8px; outline:none; font-family: inherit; }
+.date-field button{ all:unset; cursor:pointer; padding:8px; }
+.range-actions{ display:flex; align-items:center; gap:10px; margin-top:10px; justify-content: flex-start; }
+.days-pill{ font-weight:700; padding:8px 12px; border-radius:999px; background:var(--chip-bg); }
+
+/* Spinner */
+.spinner{ width:20px; height:20px; border:3px solid rgba(15,23,42,.12); border-top-color:var(--brand); border-radius:50%; animation:spin 1s linear infinite; display:inline-block; vertical-align: middle; margin-right: 8px;}
+@keyframes spin{ to{transform:rotate(360deg)} }
+
+/* Result Cards */
+.day-stack{ display:grid; gap:16px; margin-top:12px; }
+.day-card{ border:1px solid var(--border); border-radius:16px; background:var(--panel); padding:16px; box-shadow: var(--shadow); }
+.day-card-header{ border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:12px; }
+.day-chip{ display:inline-block; padding:8px 14px; border-radius:999px; background:var(--chip-sel); border:1px solid #cfe0ff; font-weight:700; font-size: 1.1rem; }
+.timeline{ list-style:none; margin:0; padding:0; }
 .tl-item{ position:relative; padding-left:24px; }
 .tl-item:not(:last-child){ padding-bottom: 20px; }
-
-/* Timeline vertical line */
-.tl-item::before{
-  content:""; position:absolute; left:6px; top:8px; bottom:-8px;
-  width:2px; background: #e0e8f9;
-}
-/* Timeline dot */
-.tl-item::after{
-  content:""; position:absolute; left:0px; top:8px;
-  width:14px; height:14px; border-radius:50%;
-  background:var(--brand);
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 1px var(--brand);
-  z-index: 1;
-}
-
+.tl-item::before{ content:""; position:absolute; left:6px; top:8px; bottom:-8px; width:2px; background: #e0e8f9; }
+.tl-item::after{ content:""; position:absolute; left:0px; top:8px; width:14px; height:14px; border-radius:50%; background:var(--brand); border: 3px solid #fff; box-shadow: 0 0 0 1px var(--brand); z-index: 1; }
 .tl-time{ font-weight:600; font-size: 0.9rem; color: var(--muted); margin-bottom: 4px; }
 .tl-title{ font-size:1.1rem; font-weight:700; margin:0 0 6px 0; }
 .tl-title .ico{ margin-right:6px; }
 .addr { color: var(--muted); font-size: 0.95rem; margin-bottom: 8px; }
 .tags { display:flex; gap:8px; flex-wrap:wrap; }
-.chip{
-  display:inline-block; padding:6px 10px; border-radius:999px;
-  border:1px solid var(--border); background:var(--chip-bg);
-  font-size:.85rem; font-weight: 600; color:#0f172a;
-}
+.chip{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--chip-bg); font-size:.85rem; font-weight: 600; color:#0f172a; }
 .chip.ghost{ background:#f8fafc }
+.chip.small{ font-size:0.8rem; padding: 4px 8px; }
+.move-details{ display:flex; flex-wrap:wrap; gap: 8px; align-items: center; margin-top: 8px; }
 
-/* ─────────────────────────────────────────────
-   Results Layout (Image + Map)
-   ───────────────────────────────────────────── */
-.msg.bot .bubble { max-width: 95%; width: 100%; }
-
-.tl-content-wrapper {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
+/* Media Layout */
+.tl-content-wrapper { display: flex; gap: 16px; align-items: flex-start; }
 .tl-text-content { flex: 1; min-width: 0; }
-.tl-media-content {
-  flex: 0 0 300px; /* Fixed width for media column */
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: sticky; /* Make it sticky */
-  top: 70px; /* Adjust based on topbar height */
-}
-
-/* Media Containers (Carousel, Map) */
-.media-carousel-container, .kakao-map-container {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  background-color: #f0f4ff;
-  aspect-ratio: 16 / 10;
-}
-.media-loading, .no-image-placeholder, .no-map-placeholder {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; height: 100%; font-weight: 700; color: var(--muted);
-  font-size: 0.9rem; text-align: center;
-}
-
-/* Carousel Styles */
+.tl-media-content { flex: 0 0 45%; max-width: 400px; display: grid; grid-template-columns: 1fr; gap: 12px; position: sticky; top: 70px; }
+.media-carousel-container, .kakao-map-container { width: 100%; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background-color: #f0f4ff; aspect-ratio: 16 / 10; }
+.media-loading, .no-image-placeholder, .no-map-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-weight: 700; color: var(--muted); font-size: 0.9rem; text-align: center; }
 .carousel { position: relative; width: 100%; height: 100%; }
 .slides-container { width: 100%; height: 100%; overflow: hidden; }
 .slides-track { height: 100%; display: flex; transition: transform 0.3s ease; }
 .carousel-slide { flex: 0 0 100%; height: 100%; }
 .carousel-slide img { width: 100%; height: 100%; object-fit: cover; }
-
-.cbtn {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 32px; height: 32px; border-radius: 50%;
-  border: none; background: rgba(255, 255, 255, 0.85);
-  cursor: pointer; z-index: 10; display: grid; place-items: center;
-  opacity: 0; transition: opacity 0.2s ease; padding: 0; font-size: 1.2rem;
-}
+.cbtn { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: 50%; border: none; background: rgba(255, 255, 255, 0.85); cursor: pointer; z-index: 10; display: grid; place-items: center; opacity: 0; transition: opacity 0.2s ease; padding: 0; font-size: 1.2rem; }
 .carousel:hover .cbtn { opacity: 1; }
 .cbtn.prev { left: 8px; }
 .cbtn.next { right: 8px; }
 .cbtn[hidden] { opacity: 0; pointer-events: none; }
-
-.dots {
-  position: absolute; bottom: 8px; left: 0; right: 0;
-  display: flex; justify-content: center; gap: 6px; z-index: 10;
-}
-.dots .dot {
-  all: unset; box-sizing: border-box; width: 8px; height: 8px;
-  border-radius: 50%; border: 1px solid rgba(0,0,0,0.1);
-  padding: 0; background: rgba(255, 255, 255, 0.7); cursor: pointer;
-}
+.dots { position: absolute; bottom: 8px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px; z-index: 10; }
+.dots .dot { all: unset; box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); padding: 0; background: rgba(255, 255, 255, 0.7); cursor: pointer; }
 .dots .dot.active { background: var(--brand); border-color: transparent; }
 
 @media (max-width: 768px) {
   .tl-content-wrapper { flex-direction: column; }
-  .tl-media-content { flex-basis: auto; width: 100%; margin-top: 12px; position: static; }
-}
-
-/* ─────────────────────────────────────────────
-   채팅창 너비 및 미디어 레이아웃 수정
-   ───────────────────────────────────────────── */
-
-/* 채팅 페이지 전체 너비 확장 */
-.chat-page {
-  max-width: 1200px; /* 기존 960px에서 확장 */
-}
-
-/* 챗봇 말풍선 최대 너비 확장 */
-.msg.bot .bubble {
-  max-width: 100%; /* 내부 콘텐츠가 꽉 차도록 확장 */
-}
-
-/* 미디어 콘텐츠 영역 레이아웃 변경 (Flex -> Grid) */
-.tl-media-content {
-  flex: 0 0 620px; /* 미디어 영역 전체 너비 고정 */
-  display: grid; /* Grid 레이아웃으로 변경 */
-  grid-template-columns: repeat(2, 1fr); /* 1:1 비율의 2열 그리드 생성 */
-  gap: 12px;
-  align-items: start; /* 상단 정렬 */
-  position: sticky;
-  top: 70px;
-}
-
-/* 이미지 및 지도 컨테이너 스타일 (변경 없음, 확인용) */
-.media-carousel-container, .kakao-map-container {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  background-color: #f0f4ff;
-  aspect-ratio: 16 / 10;
-}
-
-/* 모바일 화면에서는 기존처럼 세로로 쌓이도록 유지 */
-@media (max-width: 960px) {
-  .tl-content-wrapper {
-    flex-direction: column;
-  }
-  .tl-media-content {
-    display: flex; /* 모바일에선 다시 Flex로 변경 */
-    flex-direction: column; /* 세로로 쌓이도록 */
-    flex-basis: auto;
-    width: 100%;
-    margin-top: 12px;
-    position: static;
-  }
+  .tl-media-content { flex-basis: auto; width: 100%; margin-top: 12px; position: static; max-width: none; }
 }
