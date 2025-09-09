@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=5" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=6" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -77,8 +77,8 @@
                         </div>
                         {% if not is_move %}
                         <div class="tl-media-content">
-                          <div class="media-carousel-container"><div class="media-loading">📷</div></div>
-                          <div class="kakao-map-container"><div class="media-loading">🗺️</div></div>
+                          <div class="media-carousel-container"><div class="media-loading"><div class="spinner small"></div></div></div>
+                          <div class="kakao-map-container"><div class="media-loading"><div class="spinner small"></div></div></div>
                         </div>
                         {% endif %}
                       </div>
@@ -152,22 +152,19 @@
       if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
       window.resultsRendererInitialized = true;
       const DATA_CACHE = new Map();
-
-      // ✅ [이미지 오류 처리] 함수 추가
       window.handleImgError = function(e) {
         const img = e.target, slide = img.closest('.carousel-slide'), carousel = img.closest('.carousel');
         if (!carousel || !slide) return;
-        slide.remove(); // 실패한 슬라이드 제거
+        slide.remove();
         const slides = carousel.querySelectorAll('.carousel-slide');
-        if (slides.length === 0) { // 이미지가 하나도 없으면
+        if (slides.length === 0) {
           const container = carousel.closest('.media-carousel-container');
           if (container) container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>';
           return;
         }
         carousel.dataset.count = slides.length;
-        updateCarouselState(carousel, 0); // 캐러셀 상태 업데이트
+        updateCarouselState(carousel, 0);
       };
-
       async function fetchPlaceData(title, addr) {
         const key = `${title}|${addr}`;
         if (DATA_CACHE.has(key)) return DATA_CACHE.get(key);
@@ -199,7 +196,6 @@
       function setupCarousel(container, images) {
           if (!images || images.length === 0) { container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>'; return; }
           const count = images.length;
-          // ✅ [이미지 오류 처리] onerror 속성 추가
           const slidesHtml = images.map(src => `<div class="carousel-slide"><img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`).join('');
           const dotsHtml = count > 1 ? `<div class="dots">${Array.from({ length: count }, (_, i) => `<button type="button" class="dot" data-i="${i}"></button>`).join('')}</div>` : '';
           const buttonsHtml = count > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';

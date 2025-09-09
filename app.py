@@ -329,10 +329,22 @@ def do_generate():
         
         session["itinerary"] = _df_to_records(itinerary_df)
         session["state"] = "완료"
-        session["messages"].append({
-            "sender": "bot",
-            "html": "완료! 추천 일정을 아래에 표시했어요."
-        })
+
+        # --- ▼▼▼ MODIFIED SECTION ▼▼▼ ---
+        messages = session.get("messages", [])
+        completion_html = "완료! 추천 일정을 아래에 표시했어요."
+
+        # Check if the last message is the bot's loading message
+        if messages and messages[-1].get("sender") == "bot" and "spinner" in messages[-1].get("html", ""):
+            # If so, replace its content with the completion message
+            messages[-1]["html"] = completion_html
+        else:
+            # Otherwise, append the completion message as a new bubble (fallback)
+            messages.append({"sender": "bot", "html": completion_html})
+        
+        session["messages"] = messages
+        # --- ▲▲▲ MODIFIED SECTION ▲▲▲ ---
+
         return _json({"ok": True})
 
     except Exception as e:

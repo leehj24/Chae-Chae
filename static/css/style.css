@@ -8,7 +8,7 @@
   --input-border-active:#cfe0ff; --input-placeholder:#6b7280;
 }
 
-/* Layout */
+/* (상단부 이전과 동일) */
 *{box-sizing:border-box}
 html,body{height:auto}
 body{
@@ -16,8 +16,6 @@ body{
   font-family:-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard Variable", Pretendard, Roboto, "Noto Sans KR", "Segoe UI", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
   background: var(--bg);
 }
-
-/* Top bar */
 .topbar{
   position:sticky; top:0; z-index:10; backdrop-filter:blur(8px);
   background:linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.75) 70%, transparent);
@@ -38,15 +36,11 @@ body{
 }
 .home-btn:hover{ transform:translateY(-1px); border-color:#cdd7ee }
 .home-btn.ghost{ background: transparent; }
-
-/* Page Layout */
 .chat-page{
   max-width:960px; margin:0 auto;
   padding: 24px 16px;
   min-height: calc(100vh - var(--topbar-h) - 48px);
 }
-
-/* 채팅 전체 컨테이너 */
 .chat-container {
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -55,13 +49,9 @@ body{
   display: flex;
   flex-direction: column;
 }
-
-/* Chat window */
 .chat-window{
   padding: 16px;
 }
-
-/* Messages */
 .msg{ display:flex; margin-bottom: 12px; }
 .msg.bot{ justify-content:flex-start }
 .msg.user{ justify-content:flex-end }
@@ -77,8 +67,6 @@ body{
   color: #ffffff;
   border-color: transparent;
 }
-
-/* Input Area styles */
 .input-area {
   flex-shrink: 0;
   padding: 12px 16px;
@@ -97,8 +85,6 @@ body{
   border:1px solid #cfe0ff; background:linear-gradient(180deg,#f2f7ff,#e7f0ff);
 }
 .send-btn svg{ width:24px; height:24px; fill:#0f172a }
-
-/* Buttons in input-area */
 .button-wrap { display:flex; flex-wrap:wrap; gap:10px; justify-content: flex-start; }
 .button-wrap.wide { max-width: 600px; }
 .theme-btn, .score-btn, .transport-btn {
@@ -123,8 +109,6 @@ body{
 .primary-btn{ all:unset; box-sizing:border-box; cursor:pointer; border:1px solid #cfe0ff; background:linear-gradient(180deg,#f2f7ff,#e7f0ff); }
 .primary-btn:disabled{ opacity:0.5; cursor:not-allowed; }
 .ghost-btn{ all:unset; box-sizing:border-box; cursor:pointer; border:1px solid var(--border); background:var(--panel); }
-
-/* Date Range Form */
 .range-form { max-width: 600px; }
 .date-row{ display:flex; flex-wrap:wrap; align-items:center; justify-content: flex-start; gap:10px; }
 .date-box{ display:flex; flex-direction:column; gap:4px; }
@@ -134,10 +118,19 @@ body{
 .date-field button{ all:unset; cursor:pointer; padding:8px; }
 .range-actions{ display:flex; align-items:center; gap:10px; margin-top:10px; justify-content: flex-start; }
 .days-pill{ font-weight:700; padding:8px 12px; border-radius:999px; background:var(--chip-bg); }
+
+/* Spinner */
 .spinner{ width:20px; height:20px; border:3px solid rgba(15,23,42,.12); border-top-color:var(--brand); border-radius:50%; animation:spin 1s linear infinite; display:inline-block; vertical-align: middle; margin-right: 8px;}
 @keyframes spin{ to{transform:rotate(360deg)} }
 
-/* Result Cards */
+/* ✅ 추가: 작은 스피너 스타일 */
+.spinner.small {
+  width: 28px; height: 28px;
+  border-width: 4px;
+  margin: 0;
+}
+
+/* (이하 Result Cards 부분) */
 .day-stack{ display:grid; gap:16px; margin-top:12px; }
 .day-card{ border:1px solid var(--border); border-radius:16px; background:var(--panel); padding:16px; box-shadow: var(--shadow); }
 .day-card-header{ border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:12px; }
@@ -159,17 +152,24 @@ body{
 
 /* Media Layout */
 .tl-content-wrapper { display: flex; gap: 16px; align-items: flex-start; }
-.tl-text-content { flex: 1; min-width: 0; }
+
+/* ▼▼▼ MODIFIED SECTION ▼▼▼ */
+.tl-text-content {
+  flex: 1 1 40%; /* 텍스트 영역이 차지할 너비 비율 (기존: flex: 1) */
+  min-width: 0;
+}
 .tl-media-content {
-  flex: 0 0 45%;
-  max-width: 400px;
+  flex: 0 0 60%; /* 미디어(사진,지도) 영역이 차지할 너비 비율 (기존: 50%) */
   display: grid;
-  grid-template-columns: 1fr 1fr; /* ✅ 수정: 1열 -> 2열로 변경 */
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   position: sticky;
   top: 70px;
+  /* max-width 속성 제거하여 flex 비율에 따라 크기 조절되도록 함 */
 }
-.media-carousel-container, .kakao-map-container { width: 100%; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background-color: #f0f4ff; aspect-ratio: 4 / 3; } /* aspect-ratio 수정 */
+/* ▲▲▲ MODIFIED SECTION ▲▲▲ */
+
+.media-carousel-container, .kakao-map-container { width: 100%; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background-color: #f0f4ff; aspect-ratio: 4 / 3; }
 .media-loading, .no-image-placeholder, .no-map-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-weight: 700; color: var(--muted); font-size: 0.9rem; text-align: center; }
 .carousel { position: relative; width: 100%; height: 100%; }
 .slides-container { width: 100%; height: 100%; overflow: hidden; }
@@ -185,7 +185,7 @@ body{
 .dots .dot { all: unset; box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); padding: 0; background: rgba(255, 255, 255, 0.7); cursor: pointer; }
 .dots .dot.active { background: var(--brand); border-color: transparent; }
 
-@media (max-width: 768px) {
+@media (max-width: 960px) {
   .tl-content-wrapper { flex-direction: column; }
   .tl-media-content {
     flex-basis: auto;
@@ -193,6 +193,6 @@ body{
     margin-top: 12px;
     position: static;
     max-width: none;
-    grid-template-columns: 1fr 1fr; /* 모바일에서도 2열 유지, 필요시 1fr로 변경 */
+    grid-template-columns: 1fr 1fr;
   }
 }
