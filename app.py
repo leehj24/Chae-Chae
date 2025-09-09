@@ -464,7 +464,7 @@ def img_proxy():
     if not url or not url.startswith("http"): return abort(400)
     try:
         _ensure_session()
-        r = _SESSION.get(url, stream=True, timeout=8, headers={"Referer": ""})
+        r = _SESSION.get(url, stream=True, timeout=20, headers={"Referer": ""})
         r.raise_for_status()
         headers = {"Content-Type": r.headers.get("Content-Type", "image/jpeg"), "Cache-Control": "public, max-age=86400"}
         return Response(r.iter_content(chunk_size=8192), status=r.status_code, headers=headers)
