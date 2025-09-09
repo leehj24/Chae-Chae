@@ -138,9 +138,7 @@ def run(
     # 스케줄링 (도보 기준)
     # ======================================
     MEAL_CAT = "음식"
-    # ▼▼▼ 수정된 부분: 하루 추천 장소 수를 5개로 조정 ▼▼▼
     DAY_TOTAL_SLOTS = 5
-    # ▲▲▲ 수정된 부분 ▲▲▲
     BASE_WEIGHTS = [3,2,1]  # cats 선호 3:2:1
     BLOCKED_CAFE_KEYS = {"카페","전통찻집"}
     MEAL_CUISINE_TAGS = {"서양식","이색음식점","일식","중식","한식"}
@@ -190,7 +188,6 @@ def run(
             i += 1
         return quotas
 
-    # ✅ 하루에 같은 '요리 버킷(한/중/일/양/이색)' 중복 1회 제한
     def _bucket_ok(day_rows: List[dict], new_row: pd.Series, meal_keys: set[str]) -> bool:
         def _bucket_from_tag(s: str) -> Optional[str]:
             t = _nfc(s)
@@ -233,12 +230,29 @@ def run(
             if quotas.get(c,0) <= 0 or cur_time >= lunch_s: continue
             idx, dkm = pick_best(remain_pool[remain_pool["cat1_norm"]==c], cur_lat, cur_lon)
             if idx is None: continue
+            
             row = remain_pool.loc[idx]
             t_mv = travel_minutes(dkm) + 10.0
             t_st = stay_minutes(c)
-            st = cur_time + timedelta(minutes=t_mv)
+            
+            move_start_time = cur_time
+            move_end_time = cur_time + timedelta(minutes=t_mv)
+
+            if move_end_time > lunch_s: continue
+
+            if day_rows:
+                prev_title = day_rows[-1]["title"]
+                next_title = _nfc(row.get("title", ""))
+                day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+            
+            st = move_end_time
             et = st + timedelta(minutes=t_st)
-            if et > lunch_s: continue
+            
+            if et > lunch_s:
+                if day_rows and day_rows[-1]['title'] == '이동':
+                    day_rows.pop()
+                continue
+            
             day_rows.append(_visit_row(d, st, et, row, c, dkm, t_mv, t_st))
             quotas[c] -= 1
             cur_time = et
@@ -254,12 +268,28 @@ def run(
             for c in choices:
                 idx, dkm = pick_best(remain_pool[remain_pool["cat1_norm"]==c], cur_lat, cur_lon)
                 if idx is None: continue
+                
                 row = remain_pool.loc[idx]
                 t_mv = travel_minutes(dkm) + 10.0
                 t_st = stay_minutes(c)
-                st = cur_time + timedelta(minutes=t_mv)
+                
+                move_start_time = cur_time
+                move_end_time = cur_time + timedelta(minutes=t_mv)
+                if move_end_time > lunch_s: continue
+
+                if day_rows:
+                    prev_title = day_rows[-1]["title"]
+                    next_title = _nfc(row.get("title", ""))
+                    day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+
+                st = move_end_time
                 et = st + timedelta(minutes=t_st)
-                if et > lunch_s: continue
+
+                if et > lunch_s:
+                    if day_rows and day_rows[-1]['title'] == '이동':
+                        day_rows.pop()
+                    continue
+
                 day_rows.append(_visit_row(d, st, et, row, c, dkm, t_mv, t_st))
                 quotas[c] -= 1
                 cur_time = et
@@ -274,7 +304,6 @@ def run(
             cur_time = max(cur_time, lunch_s)
             if cur_time < lunch_e:
                 sub = remain_pool[(remain_pool["cat1_norm"]==MEAL_CAT)]
-                # 카페/전통찻집 제외 + 대표 버킷 1종
                 sub = sub[~sub["cat3_norm"].apply(is_blocked_cafe_tag)]
                 if not sub.empty:
                     idx, dkm = pick_best(sub, cur_lat, cur_lon)
@@ -283,14 +312,26 @@ def run(
                         if _bucket_ok(day_rows, row, MEAL_CUISINE_TAGS):
                             t_mv = travel_minutes(dkm) + 10.0
                             t_st = stay_minutes(MEAL_CAT)
-                            st = cur_time + timedelta(minutes=t_mv)
+                            
+                            move_start_time = cur_time
+                            move_end_time = cur_time + timedelta(minutes=t_mv)
+
+                            if day_rows:
+                                prev_title = day_rows[-1]["title"]
+                                next_title = _nfc(row.get("title", ""))
+                                day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+                            
+                            st = move_end_time
                             et = st + timedelta(minutes=t_st)
+                            
                             if et <= lunch_e:
                                 day_rows.append(_visit_row(d, st, et, row, MEAL_CAT, dkm, t_mv, t_st))
                                 quotas[MEAL_CAT] -= 1
                                 cur_time = et
                                 cur_lat, cur_lon = float(row["lat"]), float(row["lon"])
                                 remain_pool = remain_pool.drop(index=idx)
+                            elif day_rows and day_rows[-1]['title'] == '이동':
+                                day_rows.pop()
 
         # 오후(음식 제외)
         while cur_time < dinner_s and sum(quotas.values())>0:
@@ -304,9 +345,24 @@ def run(
                 row = remain_pool.loc[idx]
                 t_mv = travel_minutes(dkm) + 10.0
                 t_st = stay_minutes(c)
-                st = cur_time + timedelta(minutes=t_mv)
+
+                move_start_time = cur_time
+                move_end_time = cur_time + timedelta(minutes=t_mv)
+                if move_end_time > dinner_s: continue
+
+                if day_rows:
+                    prev_title = day_rows[-1]["title"]
+                    next_title = _nfc(row.get("title", ""))
+                    day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+
+                st = move_end_time
                 et = st + timedelta(minutes=t_st)
-                if et > dinner_s: continue
+
+                if et > dinner_s:
+                    if day_rows and day_rows[-1]['title'] == '이동':
+                        day_rows.pop()
+                    continue
+
                 day_rows.append(_visit_row(d, st, et, row, c, dkm, t_mv, t_st))
                 quotas[c] -= 1
                 cur_time = et
@@ -329,14 +385,26 @@ def run(
                         if _bucket_ok(day_rows, row, MEAL_CUISINE_TAGS):
                             t_mv = travel_minutes(dkm) + 10.0
                             t_st = stay_minutes(MEAL_CAT)
-                            st = cur_time + timedelta(minutes=t_mv)
+
+                            move_start_time = cur_time
+                            move_end_time = cur_time + timedelta(minutes=t_mv)
+
+                            if day_rows:
+                                prev_title = day_rows[-1]["title"]
+                                next_title = _nfc(row.get("title", ""))
+                                day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+
+                            st = move_end_time
                             et = st + timedelta(minutes=t_st)
+
                             if et <= dinner_e:
                                 day_rows.append(_visit_row(d, st, et, row, MEAL_CAT, dkm, t_mv, t_st))
                                 quotas[MEAL_CAT] -= 1
                                 cur_time = et
                                 cur_lat, cur_lon = float(row["lat"]), float(row["lon"])
                                 remain_pool = remain_pool.drop(index=idx)
+                            elif day_rows and day_rows[-1]['title'] == '이동':
+                                day_rows.pop()
 
         # 저녁 이후(~22:30) 남은 쿼터 (20시 이후 버킷류 금지)
         while cur_time < day_end and sum(quotas.values())>0:
@@ -353,9 +421,24 @@ def run(
                 row = remain_pool.loc[idx]
                 t_mv = travel_minutes(dkm) + 10.0
                 t_st = stay_minutes(c)
-                st = cur_time + timedelta(minutes=t_mv)
+
+                move_start_time = cur_time
+                move_end_time = cur_time + timedelta(minutes=t_mv)
+                if move_end_time > day_end: continue
+
+                if day_rows:
+                    prev_title = day_rows[-1]["title"]
+                    next_title = _nfc(row.get("title", ""))
+                    day_rows.append(_move_row(d, move_start_time, move_end_time, prev_title, next_title))
+
+                st = move_end_time
                 et = st + timedelta(minutes=t_st)
-                if et > day_end: continue
+                
+                if et > day_end:
+                    if day_rows and day_rows[-1]['title'] == '이동':
+                        day_rows.pop()
+                    continue
+
                 day_rows.append(_visit_row(d, st, et, row, c, dkm, t_mv, t_st))
                 quotas[c] -= 1
                 cur_time = et
@@ -372,10 +455,13 @@ def run(
         itins.append(day_df)
 
     # 합치기 — ✅ 최종 산출은 이 DataFrame
+    # ▼▼▼ 수정된 부분 ▼▼▼
     itinerary = pd.concat(itins, ignore_index=True) if itins else pd.DataFrame(
         columns=["day","start_time","end_time","title","addr1","cat1","cat2","cat3",
-                 "final_score","distance_from_prev_km","move_min","stay_min"]
+                 "final_score","distance_from_prev_km","move_min","stay_min",
+                 "출발지", "도착지", "교통편1", "교통편2"]
     )
+    # ▲▲▲ 수정된 부분 ▲▲▲
     return itinerary
 
 # ------------------------
@@ -422,6 +508,26 @@ def _contains_any(s: str, keys: set[str]) -> bool:
     t = _nfc(s)
     return any(k in t for k in keys)
 
+# ▼▼▼ 수정된 부분 (새로운 함수 추가) ▼▼▼
+def _move_row(day_i: int, st: datetime, et: datetime, from_title: str, to_title: str) -> dict:
+    """이동 정보를 담는 딕셔너리를 생성합니다."""
+    return {
+        "day": day_i,
+        "start_time": st.strftime("%H:%M"),
+        "end_time": et.strftime("%H:%M"),
+        "title": "이동",
+        "addr1": "", "cat1": "", "cat2": "", "cat3": "",
+        "final_score": np.nan,
+        "distance_from_prev_km": np.nan,
+        "move_min": int((et - st).total_seconds() / 60),
+        "stay_min": 0,
+        "출발지": from_title,
+        "도착지": to_title,
+        "교통편1": "도보",
+        "교통편2": "",
+    }
+# ▲▲▲ 수정된 부분 ▲▲▲
+
 def _visit_row(day_i, st: datetime, et: datetime, row: pd.Series, cat: str, dkm: float, t_mv: float, t_st: float) -> dict:
     return {
         "day": day_i,
@@ -436,4 +542,10 @@ def _visit_row(day_i, st: datetime, et: datetime, row: pd.Series, cat: str, dkm:
         "distance_from_prev_km": round(float(dkm), 2) if pd.notna(dkm) else np.nan,
         "move_min": int(round(t_mv)),
         "stay_min": int(round(t_st)),
+        # ▼▼▼ 수정된 부분 (일관성을 위한 키 추가) ▼▼▼
+        "출발지": "",
+        "도착지": "",
+        "교통편1": "",
+        "교통편2": "",
+        # ▲▲▲ 수정된 부분 ▲▲▲
     }
