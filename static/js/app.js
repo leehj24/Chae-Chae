@@ -1,124 +1,169 @@
-/* static/js/app.js
-   - index.html용 대화 상호작용
-   - 점수 버튼/테마/기간/이동수단 동작 + 일정 생성 트리거
+/*
+  static/js/app.js
+  - Handles user interactions for chat input steps.
+  - (The logic for rendering results is in a <script> tag in index.html)
 */
 (() => {
-  if (window.__CHAT_INIT__) return;
-  window.__CHAT_INIT__ = true;
+  if (window.chatInputHandlerInitialized) return;
+  window.chatInputHandlerInitialized = true;
 
-  const $  = (sel, root = document) => root.querySelector(sel);
+  const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const state = ($('.chat-window')?.dataset.state) || '지역';
+  
+  const chatWindow = document.getElementById('chat-window');
+  if (!chatWindow) return;
 
-  /* ── 점수 선택 (관광지수 / 인기도지수) ───────────────── */
+  const state = chatWindow.dataset.state || '지역';
+
+  // --- Auto-scroll to the bottom ---
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+
+  // --- Score Selection ---
   if (state === '점수') {
     const form = $('#scoreForm');
     const input = $('#scoreInput');
+
     $$('.score-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        $$('.score-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        input.value = btn.dataset.value;   // "관광지수" | "인기도지수"
+        if (!input || !form) return;
+        input.value = btn.dataset.value; // "관광지수" | "인기도지수"
         form.submit();
       });
     });
   }
 
-  /* ── 테마 선택 (최대 3개) ─────────────────────────────── */
+  // --- Theme Selection (Max 3) ---
   if (state === '테마') {
     const form = $('#themeForm');
     const input = $('#themesInput');
-    const submit = $('#themeSubmit');
-    const clear  = $('#themeClear');
-    const MAX = 3;
-    let picked = [];
+    const submitBtn = $('#themeSubmit');
+    const clearBtn = $('#themeClear');
+    const MAX_THEMES = 3;
+    let pickedThemes = [];
 
-    const refresh = () => {
-      // 버튼 selection
+    const refreshThemeUI = () => {
+      // Update button selection state
       $$('.theme-btn').forEach(b => {
-        const v = b.dataset.value;
-        b.classList.toggle('selected', picked.includes(v));
+        b.classList.toggle('selected', pickedThemes.includes(b.dataset.value));
       });
-      // hidden input & submit 버튼
-      input.value = picked.join(',');
-      submit.disabled = picked.length === 0;
-      submit.textContent = `선택 완료 (${picked.length}/${MAX})`;
+      
+      // Update hidden input and submit button state
+      if(input) input.value = pickedThemes.join(',');
+      if(submitBtn) {
+        submitBtn.disabled = pickedThemes.length === 0;
+        submitBtn.textContent = `선택 완료 (${pickedThemes.length}/${MAX_THEMES})`;
+      }
     };
 
     $$('.theme-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const v = btn.dataset.value;
-        if (picked.includes(v)) {
-          picked = picked.filter(x => x !== v);
+        const value = btn.dataset.value;
+        if (pickedThemes.includes(value)) {
+          pickedThemes = pickedThemes.filter(x => x !== value);
         } else {
-          if (picked.length >= MAX) return; // 3개 초과 방지
-          picked.push(v);
+          if (pickedThemes.length >= MAX_THEMES) return; // Prevent exceeding max
+          pickedThemes.push(value);
         }
-        refresh();
+        refreshThemeUI();
       });
     });
 
-    clear?.addEventListener('click', () => { picked = []; refresh(); });
-    submit?.addEventListener('click', () => form.submit());
-    refresh();
+    clearBtn?.addEventListener('click', () => {
+      pickedThemes = [];
+      refreshThemeUI();
+    });
+
+    submitBtn?.addEventListener('click', () => {
+      if(form) form.submit();
+    });
+
+    refreshThemeUI(); // Initial UI setup
   }
 
-  /* ── 기간 (날짜 범위) ─────────────────────────────────── */
+  // --- Date Range Selection ---
   if (state === '기간') {
     const form = $('#rangeForm');
-    const s = $('#startDate');
-    const e = $('#endDate');
-    const submit = $('#rangeSubmit');
-    const daysPrev = $('#daysPreview');
-    const openStart = $('#openStart');
-    const openEnd   = $('#openEnd');
+    const startDateInput = $('#startDate');
+    const endDateInput = $('#endDate');
+    const submitBtn = $('#rangeSubmit');
+    const daysPreview = $('#daysPreview');
+    const openStartBtn = $('#openStart');
+    const openEndBtn = $('#openEnd');
 
-    const calcDays = () => {
-      const sv = s.value, ev = e.value;
-      if (!sv || !ev) { daysPrev.textContent = '—'; submit.disabled = true; return; }
-      const sd = new Date(sv + 'T00:00:00');
-      const ed = new Date(ev + 'T00:00:00');
-      const diff = Math.round((ed - sd) / 86400000) + 1;
-      if (isNaN(diff) || diff < 1 || diff > 100) {
-        daysPrev.textContent = '범위 오류';
-        submit.disabled = true;
+    const calculateDays = () => {
+      if (!startDateInput || !endDateInput || !daysPreview || !submitBtn) return;
+      
+      const startVal = startDateInput.value;
+      const endVal = endDateInput.value;
+
+      if (!startVal || !endVal) {
+        daysPreview.textContent = '—';
+        submitBtn.disabled = true;
+        return;
+      }
+
+      const startDate = new Date(startVal);
+      const endDate = new Date(endVal);
+      const diffTime = endDate - startDate;
+      
+      if (diffTime < 0) {
+        daysPreview.textContent = '날짜 오류';
+        submitBtn.disabled = true;
+        return;
+      }
+
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+      if (isNaN(diffDays) || diffDays < 1 || diffDays > 100) {
+        daysPreview.textContent = '범위 오류';
+        submitBtn.disabled = true;
       } else {
-        daysPrev.textContent = `${diff}일`;
-        submit.disabled = false;
+        daysPreview.textContent = `${diffDays}일`;
+        submitBtn.disabled = false;
       }
     };
 
-    s?.addEventListener('change', calcDays);
-    e?.addEventListener('change', calcDays);
-    openStart?.addEventListener('click', () => s?.showPicker?.());
-    openEnd?.addEventListener('click', () => e?.showPicker?.());
-    form?.addEventListener('submit', (ev) => {
-      // 브라우저 기본검사 외에도 버튼 disabled 방지
-      if (submit.disabled) ev.preventDefault();
+    startDateInput?.addEventListener('change', calculateDays);
+    endDateInput?.addEventListener('change', calculateDays);
+    openStartBtn?.addEventListener('click', () => startDateInput?.showPicker?.());
+    openEndBtn?.addEventListener('click', () => endDateInput?.showPicker?.());
+
+    form?.addEventListener('submit', (event) => {
+      if (submitBtn && submitBtn.disabled) {
+        event.preventDefault();
+      }
     });
-    calcDays();
+    
+    calculateDays(); // Initial calculation
   }
 
-  /* ── 이동수단 (걷기/대중교통) ─────────────────────────── */
+  // --- Transport Mode Selection ---
   if (state === '이동수단') {
     const form = $('#transportForm');
     const input = $('#transportInput');
     $$('.transport-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        $$('.transport-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
+        if (!form || !input) return;
         input.value = btn.dataset.value; // "walk" | "transit"
         form.submit();
       });
     });
   }
 
-  /* ── 실행중: 일정 생성 트리거 호출 ────────────────────── */
+  // --- Trigger generation on 'executing' state ---
   if (state === '실행중') {
-    // 서버 세션에 pending_job=True 일 때만 성공.
-    // 성공/실패와 관계없이 완료되면 새로고침해 렌더 상태(완료/오류)를 반영.
+    // This POST request tells the server to start the heavy computation
     fetch('/do_generate', { method: 'POST' })
-      .then(() => window.location.reload())
-      .catch(() => window.location.reload());
+      .then(res => {
+        if (!res.ok) {
+            // Handle error if needed, e.g., show an error message
+            console.error('Generation failed on the server.');
+        }
+      })
+      .catch(err => console.error('Network error during generation:', err))
+      .finally(() => {
+        // Reload the page to show results or an error message from the server
+        window.location.reload();
+      });
   }
 })();

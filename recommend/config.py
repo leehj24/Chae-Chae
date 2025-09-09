@@ -25,9 +25,12 @@ TRANSIT_RADIUS_KM = 15
 USE_ENRICH_TRANSIT_HINTS = True
 USE_ODSay = True
 
-# ░░ 이미지 검색/캐시 관련 ░░
-# 카카오 REST API 키 (.env에 KAKAO_API_KEY=... 로 넣어주세요)
+# ░░ Kakao API 키 ░░
+# REST API 키 (서버 전용 — 절대 프론트 노출 금지)
 KAKAO_API_KEY = os.environ.get("KAKAO_API_KEY", "")
+
+# ✅ JavaScript 키 (프론트에서 Kakao Maps JS SDK 로드)
+KAKAO_JS_KEY = os.environ.get("KAKAO_JS_KEY", "")
 
 # Kakao 이미지 URL 캐시 파일 경로 (이미지 파일 X, URL만 JSON으로 저장)
 PATH_KAKAO_IMAGE_CACHE = str(ROOT / "_cache_kakao_images.json")
