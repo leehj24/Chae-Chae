@@ -1,8 +1,9 @@
 
-Flask>=2.3,<4
-Flask-Session>=0.4,<1
-gunicorn>=20,<23
-requests>=2.31,<3
-python-dotenv>=1.0,<2
-pandas>=2.1,<3
-numpy>=1.26,<3
+Flask
+Flask-Session
+gunicorn
+requests
+python-dotenv
+pandas
+numpy
+tqdm

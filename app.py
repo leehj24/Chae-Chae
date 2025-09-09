@@ -225,16 +225,18 @@ def _kakao_image_search(query: str, size: int = 4) -> List[str]:
         return [u for u in urls if len(u) < 2000]
     except Exception: return []
 
+# app.py 의 _images_for_place 함수
+
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     cache = _load_image_cache()
     key = f"{_nfc(title)}|{_nfc(addr1)}"
     
-    # 이제 캐시에 값이 있으면 바로 반환하고, 없으면 API를 호출합니다.
-    # 수정된 _load_image_cache 로직 덕분에, 서버에 파일이 없다면 이 함수가 실행되기 전에 오류가 발생합니다.
+    # 1. 캐시에 키가 있는지 확인
     if key in cache:
+        # 2. 있으면 캐시 값을 즉시 반환 (API 호출 안 함!)
         return cache[key].get("urls", [])[:max_n]
     
-    # 캐시에 없는 경우에만 API 호출 (로컬에서 캐시를 채우는 용도)
+    # 3. 캐시에 없을 때만 API를 호출 (로컬 개발 환경에서만 발생)
     q = " ".join([_nfc(title), *_addr_region_tokens(addr1)])
     urls = _kakao_image_search(q, size=max_n)
     cache[key] = {"q": q, "urls": urls, "ts": int(datetime.now().timestamp())}
