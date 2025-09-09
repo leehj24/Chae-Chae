@@ -168,15 +168,32 @@ _IMAGE_CACHE: dict[str, dict] | None = None
 _SESSION: requests.Session | None = None
 DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+# ▼▼▼ MODIFIED SECTION ▼▼▼
 def _load_image_cache() -> dict:
+    """
+    JSON 캐시 파일을 로드합니다. 파일이 없으면 예외를 발생시켜
+    서버에 파일이 제대로 배포되었는지 확인하게 합니다.
+    """
     global _IMAGE_CACHE
-    if _IMAGE_CACHE is not None: return _IMAGE_CACHE
+    if _IMAGE_CACHE is not None:
+        return _IMAGE_CACHE
+
     p = Path(PATH_KAKAO_IMAGE_CACHE)
-    if p.exists():
-        try: _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
-        except Exception: _IMAGE_CACHE = {}
-    else: _IMAGE_CACHE = {}
+    if not p.exists():
+        # 파일이 없으면 앱이 비정상 종료되도록 하여 문제를 즉시 파악하게 함
+        raise FileNotFoundError(
+            f"'{PATH_KAKAO_IMAGE_CACHE}' 파일이 존재하지 않습니다. "
+            "로컬에서 캐시 파일을 생성한 후 Git에 커밋하여 서버에 배포해야 합니다."
+        )
+    
+    try:
+        _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        # 파일이 있으나 손상된 경우
+        raise IOError(f"'{PATH_KAKAO_IMAGE_CACHE}' 파일을 읽는 중 오류 발생: {e}")
+
     return _IMAGE_CACHE
+# ▲▲▲ MODIFIED SECTION ▲▲▲
 
 def _save_image_cache():
     try:
@@ -211,8 +228,13 @@ def _kakao_image_search(query: str, size: int = 4) -> List[str]:
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     cache = _load_image_cache()
     key = f"{_nfc(title)}|{_nfc(addr1)}"
+    
+    # 이제 캐시에 값이 있으면 바로 반환하고, 없으면 API를 호출합니다.
+    # 수정된 _load_image_cache 로직 덕분에, 서버에 파일이 없다면 이 함수가 실행되기 전에 오류가 발생합니다.
     if key in cache:
         return cache[key].get("urls", [])[:max_n]
+    
+    # 캐시에 없는 경우에만 API 호출 (로컬에서 캐시를 채우는 용도)
     q = " ".join([_nfc(title), *_addr_region_tokens(addr1)])
     urls = _kakao_image_search(q, size=max_n)
     cache[key] = {"q": q, "urls": urls, "ts": int(datetime.now().timestamp())}
@@ -330,20 +352,15 @@ def do_generate():
         session["itinerary"] = _df_to_records(itinerary_df)
         session["state"] = "완료"
 
-        # --- ▼▼▼ MODIFIED SECTION ▼▼▼ ---
         messages = session.get("messages", [])
         completion_html = "완료! 추천 일정을 아래에 표시했어요."
 
-        # Check if the last message is the bot's loading message
         if messages and messages[-1].get("sender") == "bot" and "spinner" in messages[-1].get("html", ""):
-            # If so, replace its content with the completion message
             messages[-1]["html"] = completion_html
         else:
-            # Otherwise, append the completion message as a new bubble (fallback)
             messages.append({"sender": "bot", "html": completion_html})
         
         session["messages"] = messages
-        # --- ▲▲▲ MODIFIED SECTION ▲▲▲ ---
 
         return _json({"ok": True})
 
@@ -379,7 +396,6 @@ def go_back():
     }
 
     if current_state in state_flow:
-        # Go back 2 messages (user's answer + bot's question)
         messages = session.get("messages", [])
         if len(messages) >= 2:
             session["messages"] = messages[:-2]
@@ -391,7 +407,6 @@ def go_back():
     return redirect(url_for("index"))
 
 
-# ... (API Endpoints: /api/places, /api/geocode, /img-proxy remain unchanged) ...
 # ─────────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────────
@@ -464,7 +479,7 @@ def img_proxy():
     if not url or not url.startswith("http"): return abort(400)
     try:
         _ensure_session()
-        r = _SESSION.get(url, stream=True, timeout=20, headers={"Referer": ""})
+        r = _SESSION.get(url, stream=True, timeout=15, headers={"Referer": ""})
         r.raise_for_status()
         headers = {"Content-Type": r.headers.get("Content-Type", "image/jpeg"), "Cache-Control": "public, max-age=86400"}
         return Response(r.iter_content(chunk_size=8192), status=r.status_code, headers=headers)
