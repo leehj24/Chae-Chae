@@ -138,7 +138,9 @@ def run(
     # 스케줄링 (도보 기준)
     # ======================================
     MEAL_CAT = "음식"
-    DAY_TOTAL_SLOTS = 6
+    # ▼▼▼ 수정된 부분: 하루 추천 장소 수를 5개로 조정 ▼▼▼
+    DAY_TOTAL_SLOTS = 5
+    # ▲▲▲ 수정된 부분 ▲▲▲
     BASE_WEIGHTS = [3,2,1]  # cats 선호 3:2:1
     BLOCKED_CAFE_KEYS = {"카페","전통찻집"}
     MEAL_CUISINE_TAGS = {"서양식","이색음식점","일식","중식","한식"}
