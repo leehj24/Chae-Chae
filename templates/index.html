@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=4" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=5" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -25,121 +25,118 @@
   </header>
 
   <main class="chat-page">
-    <section id="chat-window" class="chat-window" data-state="{{ state }}">
-      {% for msg in session.get('messages', []) %}
-        <div class="msg {{ 'user' if msg.sender == 'user' else 'bot' }}">
-          <div class="bubble">
-            {% if msg.html %}{{ msg.html|safe }}{% else %}{{ msg.text }}{% endif %}
+    <div class="chat-container">
+      <section id="chat-window" class="chat-window" data-state="{{ state }}">
+        {% for msg in session.get('messages', []) %}
+          <div class="msg {{ 'user' if msg.sender == 'user' else 'bot' }}">
+            <div class="bubble">
+              {% if msg.html %}{{ msg.html|safe }}{% else %}{{ msg.text }}{% endif %}
+            </div>
           </div>
-        </div>
-      {% endfor %}
+        {% endfor %}
 
-      {% if state == '완료' and session.get('itinerary') %}
-        {% set itin = session.get('itinerary', []) %}
-        {% set groups = (itin|groupby('day'))|list %}
-        {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️'} %}
-        <div class="day-stack">
-          {% for day, rows in groups %}
-            {% set rows = rows|list %}
-            {% set day_label = (rows[0].get('day_label') or (day ~ '일차')) %}
-            <section class="day-card" data-day="{{ day }}">
-              <header class="day-card-header"><div class="day-chip">{{ day_label }}</div></header>
-              <ol class="timeline">
-                {% for r in rows %}
-                  {% set is_move = (r.title == '이동') %}
-                  <li class="tl-item {{ 'move' if is_move else 'visit' }}"
-                      {% if not is_move %}
-                        data-title="{{ r.title }}"
-                        data-addr1="{{ r.addr1 }}"
-                      {% endif %}>
-                    <div class="tl-content-wrapper">
-                      <div class="tl-text-content">
-                        <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
+        {% if state == '완료' and session.get('itinerary') %}
+          {% set itin = session.get('itinerary', []) %}
+          {% set groups = (itin|groupby('day'))|list %}
+          {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️'} %}
+          <div class="day-stack">
+            {% for day, rows in groups %}
+              {% set rows = rows|list %}
+              {% set day_label = (rows[0].get('day_label') or (day ~ '일차')) %}
+              <section class="day-card" data-day="{{ day }}">
+                <header class="day-card-header"><div class="day-chip">{{ day_label }}</div></header>
+                <ol class="timeline">
+                  {% for r in rows %}
+                    {% set is_move = (r.title == '이동') %}
+                    <li class="tl-item {{ 'move' if is_move else 'visit' }}"
                         {% if not is_move %}
-                          <h4 class="tl-title"><span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>{{ r.title }}</h4>
-                          <div class="addr">{{ r.addr1 }}</div>
-                          <div class="tags">
-                            {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
-                            {% if r.cat3 %}<span class="chip ghost">{{ r.cat3 }}</span>{% endif %}
-                          </div>
-                        {% else %}
-                          <h4 class="tl-title">🚇 이동</h4>
-                          <div class="move-details">
-                            {% if r.교통편1 or r.교통편2 %}
-                              <span class="chip ghost small">{{ r.교통편1 }}</span>
-                              <span class="chip ghost small">{{ r.교통편2 }}</span>
-                            {% else %}
-                              <span>{{ r.출발지 }} → {{ r.도착지 }}</span>
-                            {% endif %}
-                          </div>
+                          data-title="{{ r.title }}"
+                          data-addr1="{{ r.addr1 }}"
+                        {% endif %}>
+                      <div class="tl-content-wrapper">
+                        <div class="tl-text-content">
+                          <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
+                          {% if not is_move %}
+                            <h4 class="tl-title"><span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>{{ r.title }}</h4>
+                            <div class="addr">{{ r.addr1 }}</div>
+                            <div class="tags">
+                              {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
+                              {% if r.cat3 %}<span class="chip ghost">{{ r.cat3 }}</span>{% endif %}
+                            </div>
+                          {% else %}
+                            <h4 class="tl-title">🚇 이동</h4>
+                            <div class="move-details">
+                              {% if r.교통편1 or r.교통편2 %}
+                                <span class="chip ghost small">{{ r.교통편1 }}</span>
+                                <span class="chip ghost small">{{ r.교통편2 }}</span>
+                              {% else %}
+                                <span>{{ r.출발지 }} → {{ r.도착지 }}</span>
+                              {% endif %}
+                            </div>
+                          {% endif %}
+                        </div>
+                        {% if not is_move %}
+                        <div class="tl-media-content">
+                          <div class="media-carousel-container"><div class="media-loading">📷</div></div>
+                          <div class="kakao-map-container"><div class="media-loading">🗺️</div></div>
+                        </div>
                         {% endif %}
                       </div>
-                      {% if not is_move %}
-                      <div class="tl-media-content">
-                        <div class="media-carousel-container"><div class="media-loading">📷</div></div>
-                        <div class="kakao-map-container"><div class="media-loading">🗺️</div></div>
-                      </div>
-                      {% endif %}
-                    </div>
-                  </li>
-                {% endfor %}
-              </ol>
-            </section>
-          {% endfor %}
-        </div>
-      {% endif %}
-    </section>
-
-    <div class="input-area">
-      {% if state == '지역' %}
-        <form class="input-bar" method="post" action="{{ url_for('chat') }}">
-          <input class="chat-input" type="text" name="region" placeholder="예) 서울, 부산, 제주…" required autofocus />
-          <button class="send-btn" type="submit" aria-label="보내기">
-            <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
-          </button>
-        </form>
-
-      {% elif state == '점수' %}
-        <div class="button-wrap">
-          <button type="button" class="score-btn theme-btn" data-value="관광지수"><span class="icon">🗺️</span><span class="label">관광지수</span></button>
-          <button type="button" class="score-btn theme-btn" data-value="인기도지수"><span class="icon">🔥</span><span class="label">인기도지수</span></button>
-        </div>
-        <form id="scoreForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="score" id="scoreInput" /></form>
-
-      {% elif state == '테마' %}
-        {% set themes = [{'v': '자연', 'l': '자연', 'i': '🌳'}, {'v': '레포츠', 'l': '레포츠', 'i': '🏃'}, {'v': '쇼핑', 'l': '쇼핑', 'i': '🛍️'}, {'v': '음식', 'l': '음식', 'i': '🍽️'}, {'v': '인문(문화/예술/역사)', 'l': '문화', 'i': '🎭'}] %}
-        <div class="button-wrap wide">
-          {% for t in themes %}
-            <button type="button" class="theme-btn" data-value="{{ t.v }}"><span class="icon">{{ t.i }}</span><span class="label">{{ t.l }}</span></button>
-          {% endfor %}
-        </div>
-        <div class="theme-actions">
-          <button id="themeClear" type="button" class="ghost-btn small">초기화</button>
-          <button id="themeSubmit" type="button" class="primary-btn small" disabled>선택 완료 (0/3)</button>
-        </div>
-        <form id="themeForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="themes" id="themesInput" /></form>
-
-      {% elif state == '기간' %}
-        <form id="rangeForm" class="range-form" method="post" action="{{ url_for('chat') }}">
-          <div class="date-row">
-            <div class="date-box"><label for="startDate">시작</label><div class="date-field"><input id="startDate" name="start_date" type="date" /><button id="openStart" type="button">📅</button></div></div>
-            <span class="date-tilde">~</span>
-            <div class="date-box"><label for="endDate">종료</label><div class="date-field"><input id="endDate" name="end_date" type="date" /><button id="openEnd" type="button">📅</button></div></div>
+                    </li>
+                  {% endfor %}
+                </ol>
+              </section>
+            {% endfor %}
           </div>
-          <div class="range-actions">
-            <div class="days-pill">총 <span id="daysPreview">—</span></div>
-            <button id="rangeSubmit" type="submit" class="primary-btn small" disabled>확인</button>
+        {% endif %}
+      </section>
+
+      <div class="input-area">
+        {% if state == '지역' %}
+          <form class="input-bar" method="post" action="{{ url_for('chat') }}">
+            <input class="chat-input" type="text" name="region" placeholder="예) 서울, 부산, 제주…" required autofocus />
+            <button class="send-btn" type="submit" aria-label="보내기">
+              <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+            </button>
+          </form>
+        {% elif state == '점수' %}
+          <div class="button-wrap">
+            <button type="button" class="score-btn theme-btn" data-value="관광지수"><span class="icon">🗺️</span><span class="label">관광지수</span></button>
+            <button type="button" class="score-btn theme-btn" data-value="인기도지수"><span class="icon">🔥</span><span class="label">인기도지수</span></button>
           </div>
-        </form>
-
-      {% elif state == '이동수단' %}
-        <div class="button-wrap">
-          <button type="button" class="transport-btn theme-btn" data-value="walk"><span class="icon">🚶</span><span class="label">걷기</span></button>
-          <button type="button" class="transport-btn theme-btn" data-value="transit"><span class="icon">🚋</span><span class="label">대중교통</span></button>
-        </div>
-        <form id="transportForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="transport" id="transportInput" /></form>
-
-      {% endif %}
+          <form id="scoreForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="score" id="scoreInput" /></form>
+        {% elif state == '테마' %}
+          {% set themes = [{'v': '자연', 'l': '자연', 'i': '🌳'}, {'v': '레포츠', 'l': '레포츠', 'i': '🏃'}, {'v': '쇼핑', 'l': '쇼핑', 'i': '🛍️'}, {'v': '음식', 'l': '음식', 'i': '🍽️'}, {'v': '인문(문화/예술/역사)', 'l': '문화', 'i': '🎭'}] %}
+          <div class="button-wrap wide">
+            {% for t in themes %}
+              <button type="button" class="theme-btn" data-value="{{ t.v }}"><span class="icon">{{ t.i }}</span><span class="label">{{ t.l }}</span></button>
+            {% endfor %}
+          </div>
+          <div class="theme-actions">
+            <button id="themeClear" type="button" class="ghost-btn small">초기화</button>
+            <button id="themeSubmit" type="button" class="primary-btn small" disabled>선택 완료 (0/3)</button>
+          </div>
+          <form id="themeForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="themes" id="themesInput" /></form>
+        {% elif state == '기간' %}
+          <form id="rangeForm" class="range-form" method="post" action="{{ url_for('chat') }}">
+            <div class="date-row">
+              <div class="date-box"><label for="startDate">시작</label><div class="date-field"><input id="startDate" name="start_date" type="date" /><button id="openStart" type="button">📅</button></div></div>
+              <span class="date-tilde">~</span>
+              <div class="date-box"><label for="endDate">종료</label><div class="date-field"><input id="endDate" name="end_date" type="date" /><button id="openEnd" type="button">📅</button></div></div>
+            </div>
+            <div class="range-actions">
+              <div class="days-pill">총 <span id="daysPreview">—</span></div>
+              <button id="rangeSubmit" type="submit" class="primary-btn small" disabled>확인</button>
+            </div>
+          </form>
+        {% elif state == '이동수단' %}
+          <div class="button-wrap">
+            <button type="button" class="transport-btn theme-btn" data-value="walk"><span class="icon">🚶</span><span class="label">걷기</span></button>
+            <button type="button" class="transport-btn theme-btn" data-value="transit"><span class="icon">🚋</span><span class="label">대중교통</span></button>
+          </div>
+          <form id="transportForm" method="post" action="{{ url_for('chat') }}"><input type="hidden" name="transport" id="transportInput" /></form>
+        {% endif %}
+      </div>
     </div>
   </main>
 
@@ -155,6 +152,22 @@
       if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
       window.resultsRendererInitialized = true;
       const DATA_CACHE = new Map();
+
+      // ✅ [이미지 오류 처리] 함수 추가
+      window.handleImgError = function(e) {
+        const img = e.target, slide = img.closest('.carousel-slide'), carousel = img.closest('.carousel');
+        if (!carousel || !slide) return;
+        slide.remove(); // 실패한 슬라이드 제거
+        const slides = carousel.querySelectorAll('.carousel-slide');
+        if (slides.length === 0) { // 이미지가 하나도 없으면
+          const container = carousel.closest('.media-carousel-container');
+          if (container) container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>';
+          return;
+        }
+        carousel.dataset.count = slides.length;
+        updateCarouselState(carousel, 0); // 캐러셀 상태 업데이트
+      };
+
       async function fetchPlaceData(title, addr) {
         const key = `${title}|${addr}`;
         if (DATA_CACHE.has(key)) return DATA_CACHE.get(key);
@@ -186,7 +199,8 @@
       function setupCarousel(container, images) {
           if (!images || images.length === 0) { container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>'; return; }
           const count = images.length;
-          const slidesHtml = images.map(src => `<div class="carousel-slide"><img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer"></div>`).join('');
+          // ✅ [이미지 오류 처리] onerror 속성 추가
+          const slidesHtml = images.map(src => `<div class="carousel-slide"><img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`).join('');
           const dotsHtml = count > 1 ? `<div class="dots">${Array.from({ length: count }, (_, i) => `<button type="button" class="dot" data-i="${i}"></button>`).join('')}</div>` : '';
           const buttonsHtml = count > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
           container.innerHTML = `<div class="carousel" data-slide="0" data-count="${count}">${buttonsHtml}<div class="slides-container"><div class="slides-track">${slidesHtml}</div></div>${dotsHtml}</div>`;
