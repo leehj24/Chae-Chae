@@ -10,6 +10,7 @@ import re
 import os
 import threading
 import math
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
@@ -18,9 +19,10 @@ import numpy as np
 import pandas as pd
 import unicodedata as ud
 import requests
+from werkzeug.utils import secure_filename
 from tqdm import tqdm
 
-from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort)
+from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort, send_from_directory)
 from flask_session import Session
 
 # =========================
@@ -45,7 +47,13 @@ app = Flask(
 )
 app.secret_key = "dev-secret-key"
 
-# ---------- Server-side Session Configuration ----------
+# ---------- App Configuration ----------
+UPLOAD_FOLDER = str(BASE_DIR / "uploads")
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024  # 8 MB limit
+
 app.config.update(
     SESSION_TYPE="filesystem",
     SESSION_FILE_DIR=str((BASE_DIR / "_fs_sessions").resolve()),
@@ -96,7 +104,6 @@ def _init_session_if_needed():
         session["state"] = "지역"
     if "messages" not in session or not session["messages"]:
         session["messages"] = [{"sender": "bot", "html": BOT_PROMPTS["지역"]}]
-
 
 # ─────────────────────────────────────────
 # CSV Loading & Caching
@@ -149,8 +156,14 @@ def _load_places_df() -> pd.DataFrame:
 
     for c in ("cat3", "firstimage"):
         if c not in df.columns: df[c] = ""
+    
+    # ▼▼▼ [수정] score 컬럼이 없거나 비어있을 경우 0으로 처리 ▼▼▼
     for c in ("tour_score", "review_score"):
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+        # 컬럼이 없으면 0으로 채우고, 있으면 숫자 변환 실패 시(NaN) 0으로 채웁니다.
+        if c not in df.columns: df[c] = 0
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    # ▲▲▲ [수정] ▲▲▲
+
     for c in ("title", "addr1", "cat1", "cat3", "firstimage"):
         df[c] = df[c].astype(str).fillna("")
 
@@ -161,6 +174,43 @@ def _load_places_df() -> pd.DataFrame:
 def _sort_key_from_param(s: str) -> tuple[str, str]:
     s = (s or "").strip().lower()
     return ("review_score", "인기도 지수") if s in {"popular", "review", "review_score", "인기도"} else ("tour_score", "관광 지수")
+
+# ─────────────────────────────────────────
+# User Uploads Management (NEW)
+# ─────────────────────────────────────────
+PATH_USER_UPLOADS = str(BASE_DIR / "_user_uploads.json")
+_USER_UPLOADS_CACHE = {"data": None, "mtime": None}
+_USER_UPLOADS_LOCK = threading.Lock()
+
+def _allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def _load_user_uploads():
+    with _USER_UPLOADS_LOCK:
+        p = Path(PATH_USER_UPLOADS)
+        if not p.exists():
+            return {}
+        try:
+            mtime = p.stat().st_mtime
+            if _USER_UPLOADS_CACHE["data"] is not None and _USER_UPLOADS_CACHE["mtime"] == mtime:
+                return _USER_UPLOADS_CACHE["data"]
+            
+            data = json.loads(p.read_text(encoding="utf-8"))
+            _USER_UPLOADS_CACHE["data"] = data
+            _USER_UPLOADS_CACHE["mtime"] = mtime
+            return data
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+def _save_user_uploads(data):
+    with _USER_UPLOADS_LOCK:
+        try:
+            p = Path(PATH_USER_UPLOADS)
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            _USER_UPLOADS_CACHE["data"] = None
+            _USER_UPLOADS_CACHE["mtime"] = None
+        except Exception as e:
+            print(f"❌ 에러: 사용자 업로드 파일 저장 실패 - {e}")
 
 # ─────────────────────────────────────────
 # Kakao Image/Local API + Caching
@@ -229,6 +279,43 @@ def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
         return cache[key].get("urls", [])[:max_n]
     
     return []
+
+def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
+    key = f"{_nfc(title)}|{_nfc(addr1)}"
+    query = " ".join([title, *_addr_region_tokens(addr1)])
+    urls = _kakao_image_search(query, size=4)
+    
+    cache = _load_image_cache()
+    cache[key] = {
+        "q": query,
+        "urls": urls,
+        "ts": int(datetime.now().timestamp())
+    }
+    _save_image_cache()
+    return urls
+
+def _get_all_images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
+    key = f"{_nfc(title)}|{_nfc(addr1)}"
+
+    # 1. User uploaded images (highest priority)
+    uploads_db = _load_user_uploads()
+    user_filenames = uploads_db.get(key, [])
+    user_imgs = [url_for('uploaded_file', filename=f) for f in user_filenames]
+
+    # 2. Kakao cached images
+    kakao_imgs = _images_for_place(title, addr1, max_n=4)
+
+    # 3. CSV firstimage as a fallback
+    df = _load_places_df()
+    match = df[(df['title'].apply(_nfc) == _nfc(title)) & (df['addr1'].apply(_nfc) == _nfc(addr1))]
+    csv_imgs = []
+    if not match.empty:
+      csv_img_url = match.iloc[0].get('firstimage')
+      if csv_img_url and isinstance(csv_img_url, str) and csv_img_url.strip():
+          csv_imgs.append(csv_img_url)
+
+    combined = list(dict.fromkeys(user_imgs + kakao_imgs + csv_imgs))
+    return combined[:max_n]
 
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
     if not KAKAO_API_KEY: return None
@@ -503,6 +590,40 @@ def go_back():
 # ─────────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────────
+@app.get("/uploads/<path:filename>")
+def uploaded_file(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+@app.post("/api/upload-image")
+def upload_image():
+    title = request.form.get('title')
+    addr1 = request.form.get('addr1')
+    if 'file' not in request.files or not title or not addr1:
+        return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
+
+    file = request.files['file']
+    if file.filename == '' or not _allowed_file(file.filename):
+        return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
+
+    key = f"{_nfc(title)}|{_nfc(addr1)}"
+    uploads = _load_user_uploads()
+    current_images = uploads.get(key, [])
+
+    all_images_before_upload = _get_all_images_for_place(title, addr1)
+    if len(all_images_before_upload) >= 4:
+        return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
+
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    filename = secure_filename(f"{uuid.uuid4()}.{ext}")
+    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+    current_images.append(filename)
+    uploads[key] = current_images
+    _save_user_uploads(uploads)
+
+    all_images_after_upload = _get_all_images_for_place(title, addr1)
+    return _json({"ok": True, "images": all_images_after_upload})
+
 @app.get("/api/places")
 def api_places():
     try:
@@ -514,14 +635,19 @@ def api_places():
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                csv_imgs = [u for u in [str(r.get("firstimage") or "")] if u]
-                kakao_imgs = _images_for_place(title, addr1, max_n=4)
-                all_images = list(dict.fromkeys(csv_imgs + kakao_imgs))
+                key = f"{title}|{addr1}"
                 
+                all_images = _get_all_images_for_place(title, addr1, max_n=4)
+                
+                image_cache = _load_image_cache()
+                if not all_images and key not in image_cache:
+                    _fetch_and_cache_images_live(title, addr1)
+                    all_images = _get_all_images_for_place(title, addr1, max_n=4)
+
                 items_list.append({
                     "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
                     "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")),
-                    "images": all_images[:4],
+                    "images": all_images,
                     "tour_score":   r.get("tour_score") if pd.notna(r.get("tour_score")) else None,
                     "review_score": r.get("review_score") if pd.notna(r.get("review_score")) else None,
                 })
@@ -537,7 +663,11 @@ def api_places():
             per_page = max(1, min(100, int(request.args.get("per_page", 40))))
             score_col, score_label = _sort_key_from_param(sort)
 
-            df_sorted = df.sort_values(by=[score_col], ascending=[False], na_position="last").reset_index(drop=True)
+            if score_col not in df.columns:
+                df_sorted = df.copy()
+            else:
+                df_sorted = df.sort_values(by=[score_col], ascending=[False], na_position="last").reset_index(drop=True)
+
             total, total_pages = len(df_sorted), max(1, math.ceil(len(df_sorted) / per_page))
             page = min(page, total_pages)
             start, end = (page - 1) * per_page, page * per_page
@@ -551,6 +681,10 @@ def api_places():
                 "items": process_view_to_items(view),
             })
     except Exception as e:
+        # ▼▼▼ [수정] 터미널에 상세 오류 로그를 출력하도록 수정 ▼▼▼
+        print("❌ API Error in /api/places:")
+        traceback.print_exc()
+        # ▲▲▲ [수정] ▲▲▲
         return _json({"ok": False, "error": str(e), "trace": traceback.format_exc(limit=4)}, 500)
 
 @app.get("/api/geocode")

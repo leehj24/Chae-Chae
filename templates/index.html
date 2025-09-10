@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=6" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=8" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -160,17 +160,26 @@
       };
 
       window.handleImgError = function(e) {
-        const img = e.target, slide = img.closest('.carousel-slide'), carousel = img.closest('.carousel');
+        const img = e.target;
+        const slide = img.closest('.carousel-slide');
+        const carousel = img.closest('.carousel');
         if (!carousel || !slide) return;
-        slide.remove();
-        const slides = carousel.querySelectorAll('.carousel-slide');
-        if (slides.length === 0) {
-          const container = carousel.closest('.media-carousel-container');
-          if (container) container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>';
-          return;
+        
+        const title = carousel.closest('.tl-item.visit')?.dataset.title || '';
+        const addr = carousel.closest('.tl-item.visit')?.dataset.addr1 || '';
+        const key = `${title}|${addr}`;
+        
+        // Remove from cache and re-render
+        if(DATA_CACHE.has(key)) {
+            const data = DATA_CACHE.get(key);
+            data.images = data.images.filter(url => !img.src.includes(encodeURIComponent(url)));
+            setupCarousel(carousel.parentElement, data.images, title, addr);
+        } else {
+            slide.remove();
+            const slides = carousel.querySelectorAll('.carousel-slide');
+            carousel.dataset.count = slides.length;
+            updateCarouselState(carousel, 0);
         }
-        carousel.dataset.count = slides.length;
-        updateCarouselState(carousel, 0);
       };
       
       async function fetchPlaceData(title, addr) {
@@ -191,34 +200,113 @@
       }
 
       function updateCarouselState(carousel, newIndex) {
-          const track = carousel.querySelector('.slides-track'), dots = carousel.querySelectorAll('.dots .dot');
-          const prevBtn = carousel.querySelector('.cbtn.prev'), nextBtn = carousel.querySelector('.cbtn.next');
-          const count = parseInt(carousel.dataset.count, 10) || 0;
-          if (count === 0 || !track) return;
-          const index = Math.max(0, Math.min(newIndex, count - 1));
+          const track = carousel.querySelector('.slides-track');
+          const dots = carousel.querySelectorAll('.dots .dot');
+          const prevBtn = carousel.querySelector('.cbtn.prev');
+          const nextBtn = carousel.querySelector('.cbtn.next');
+          
+          const totalCount = parseInt(carousel.dataset.count, 10);
+          const imageCount = parseInt(carousel.dataset.imageCount, 10);
+          if (totalCount === 0 || !track) return;
+
+          const index = Math.max(0, Math.min(newIndex, totalCount - 1));
           carousel.dataset.slide = index;
           track.style.transform = `translateX(-${index * 100}%)`;
-          dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+          
+          dots.forEach((dot, i) => dot.classList.toggle('active', i === index && index < imageCount));
+          
           if (prevBtn) prevBtn.hidden = (index <= 0);
-          if (nextBtn) nextBtn.hidden = (index >= count - 1);
+          if (nextBtn) nextBtn.hidden = (index >= totalCount - 1);
       }
 
-      function setupCarousel(container, images) {
-          if (!images || images.length === 0) { container.innerHTML = '<div class="no-image-placeholder">이미지 없음</div>'; return; }
-          const count = images.length;
-          const slidesHtml = images.map(src => `<div class="carousel-slide"><img src="/img-proxy?u=${encodeURIComponent(src)}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`).join('');
-          const dotsHtml = count > 1 ? `<div class="dots">${Array.from({ length: count }, (_, i) => `<button type="button" class="dot" data-i="${i}"></button>`).join('')}</div>` : '';
-          const buttonsHtml = count > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
-          container.innerHTML = `<div class="carousel" data-slide="0" data-count="${count}">${buttonsHtml}<div class="slides-container"><div class="slides-track">${slidesHtml}</div></div>${dotsHtml}</div>`;
+      async function handleImageUpload(file, title, addr, container) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('title', title);
+        formData.append('addr1', addr);
+
+        const uploader = container.querySelector('.image-uploader');
+        if (uploader) uploader.innerHTML = '<div class="media-loading"><div class="spinner small"></div></div>';
+
+        try {
+            const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
+            const result = await response.json();
+
+            if (!response.ok || !result.ok) throw new Error(result.error || '서버 업로드 실패');
+
+            if (result.images) {
+                const key = `${title}|${addr}`;
+                const cached = DATA_CACHE.get(key) || { coords: null };
+                cached.images = result.images;
+                DATA_CACHE.set(key, cached);
+                setupCarousel(container, result.images, title, addr);
+            }
+        } catch (error) {
+            alert(`업로드 실패: ${error.message}`);
+            const key = `${title}|${addr}`;
+            const cachedImages = DATA_CACHE.get(key)?.images || [];
+            setupCarousel(container, cachedImages, title, addr);
+        }
+      }
+
+      function setupCarousel(container, images, title, addr) {
+          const existingImages = images || [];
+          const imageCount = existingImages.length;
+          const uniqueId = `file-upload-${Math.random().toString(36).substr(2, 9)}`;
+
+          if (imageCount === 0) {
+              const uploaderHtml = `
+                  <div class="image-uploader standalone">
+                      <label for="${uniqueId}" class="uploader-label">📸 촬영하기 또는 업로드하기</label>
+                      <input id="${uniqueId}" type="file" class="uploader-input" accept="image/png, image/jpeg, image/gif">
+                  </div>`;
+              container.innerHTML = `<div class="no-image-placeholder">이미지 없음</div>` + uploaderHtml;
+          } else {
+              const slidesHtml = existingImages.map(src => {
+                  const proxiedSrc = (src.startsWith('/uploads')) ? src : `/img-proxy?u=${encodeURIComponent(src)}`;
+                  return `<div class="carousel-slide"><img src="${proxiedSrc}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`;
+              }).join('');
+              
+              let uploaderSlideHtml = '';
+              let finalSlideCount = imageCount;
+
+              if (imageCount < 4) {
+                  finalSlideCount = imageCount + 1;
+                  uploaderSlideHtml = `
+                      <div class="carousel-slide uploader-slide">
+                          <div class="image-uploader">
+                              <label for="${uniqueId}" class="uploader-label">📸 촬영하기 또는 업로드하기 (${imageCount}/4)</label>
+                              <input id="${uniqueId}" type="file" class="uploader-input" accept="image/png, image/jpeg, image/gif">
+                          </div>
+                      </div>`;
+              }
+              
+              const totalSlidesHtml = slidesHtml + uploaderSlideHtml;
+              const dotsHtml = imageCount > 0 ? `<div class="dots">${Array.from({ length: imageCount }, (_, i) => `<button type="button" class="dot ${i === 0 ? 'active' : ''}" data-i="${i}"></button>`).join('')}</div>` : '';
+              const buttonsHtml = finalSlideCount > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
+
+              container.innerHTML = `<div class="carousel" data-slide="0" data-count="${finalSlideCount}" data-image-count="${imageCount}">${buttonsHtml}<div class="slides-container"><div class="slides-track">${totalSlidesHtml}</div></div>${dotsHtml}</div>`;
+          }
+
           const carousel = container.querySelector('.carousel');
-          updateCarouselState(carousel, 0);
-          carousel.addEventListener('click', (e) => {
-              const target = e.target;
-              let currentIndex = parseInt(carousel.dataset.slide || '0', 10);
-              if (target.closest('.cbtn.next')) updateCarouselState(carousel, currentIndex + 1);
-              else if (target.closest('.cbtn.prev')) updateCarouselState(carousel, currentIndex - 1);
-              else if (target.matches('.dot')) updateCarouselState(carousel, parseInt(target.dataset.i, 10));
-          });
+          if (carousel) {
+              updateCarouselState(carousel, 0);
+              carousel.addEventListener('click', (e) => {
+                  const target = e.target;
+                  let currentIndex = parseInt(carousel.dataset.slide || '0', 10);
+                  if (target.closest('.cbtn.next')) updateCarouselState(carousel, currentIndex + 1);
+                  else if (target.closest('.cbtn.prev')) updateCarouselState(carousel, currentIndex - 1);
+                  else if (target.matches('.dot')) updateCarouselState(carousel, parseInt(target.dataset.i, 10));
+              });
+          }
+
+          const fileInput = container.querySelector('.uploader-input');
+          if (fileInput) {
+              fileInput.addEventListener('change', (event) => {
+                  const file = event.target.files[0];
+                  if (file) handleImageUpload(file, title, addr, container);
+              });
+          }
       }
 
       function setupMap(container, coords, title) {
@@ -282,7 +370,6 @@
       async function initializeAllItems() {
           const allItems = document.querySelectorAll('li.tl-item');
           
-          // 1. data attribute 설정
           const visits = Array.from(document.querySelectorAll('li.tl-item.visit'));
           document.querySelectorAll('li.tl-item.move').forEach((moveNode, i) => {
               if (visits[i] && visits[i+1]) {
@@ -291,15 +378,16 @@
               }
           });
 
-          // 2. 모든 아이템 초기화
           for(const item of allItems) {
             if (item.classList.contains('visit')) {
-              const data = await fetchPlaceData(item.dataset.title, item.dataset.addr1);
+              const title = item.dataset.title;
+              const addr = item.dataset.addr1;
+              const data = await fetchPlaceData(title, addr);
               if (!data) continue;
               const carouselContainer = item.querySelector('.media-carousel-container');
               const mapContainer = item.querySelector('.kakao-map-container');
-              if (carouselContainer) setupCarousel(carouselContainer, data.images);
-              if (mapContainer) setupMap(mapContainer, data.coords, item.dataset.title);
+              if (carouselContainer) setupCarousel(carouselContainer, data.images, title, addr);
+              if (mapContainer) setupMap(mapContainer, data.coords, title);
             }
             else if (item.classList.contains('move')) {
                 const detailsEl = item.querySelector('.move-details');
