@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import json
-import math
+import time # 추가
 import traceback
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,7 +15,7 @@ import pandas as pd
 import unicodedata as ud
 import re
 import requests
-import urllib.parse
+from tqdm import tqdm # 추가
 
 from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort)
 from flask_session import Session
@@ -53,7 +53,6 @@ app.config.update(
 )
 Path(app.config["SESSION_FILE_DIR"]).mkdir(parents=True, exist_ok=True)
 Session(app)
-
 
 # ---------- Bot's Questions ----------
 BOT_PROMPTS = {
@@ -106,7 +105,8 @@ def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
         try: return pd.read_csv(path, encoding=enc)
         except Exception: pass
-    return pd.read_csv(path)
+    # 모든 인코딩 실패 시 예외 발생
+    raise IOError(f"Failed to read CSV file with common encodings: {path}")
 
 def _pick_column(df: pd.DataFrame, *names: str) -> str | None:
     low = {c.lower(): c for c in df.columns}
@@ -168,11 +168,11 @@ _IMAGE_CACHE: dict[str, dict] | None = None
 _SESSION: requests.Session | None = None
 DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-# ▼▼▼ MODIFIED SECTION ▼▼▼
+# ▼▼▼ 수정된 부분 ▼▼▼
 def _load_image_cache() -> dict:
     """
-    JSON 캐시 파일을 로드합니다. 파일이 없으면 예외를 발생시켜
-    서버에 파일이 제대로 배포되었는지 확인하게 합니다.
+    JSON 캐시 파일을 로드합니다. 파일이 없으면 비어있는 딕셔너리를 반환하고
+    메모리에 캐시합니다.
     """
     global _IMAGE_CACHE
     if _IMAGE_CACHE is not None:
@@ -180,26 +180,31 @@ def _load_image_cache() -> dict:
 
     p = Path(PATH_KAKAO_IMAGE_CACHE)
     if not p.exists():
-        # 파일이 없으면 앱이 비정상 종료되도록 하여 문제를 즉시 파악하게 함
-        raise FileNotFoundError(
-            f"'{PATH_KAKAO_IMAGE_CACHE}' 파일이 존재하지 않습니다. "
-            "로컬에서 캐시 파일을 생성한 후 Git에 커밋하여 서버에 배포해야 합니다."
-        )
+        _IMAGE_CACHE = {}
+        return _IMAGE_CACHE
     
     try:
         _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:
-        # 파일이 있으나 손상된 경우
-        raise IOError(f"'{PATH_KAKAO_IMAGE_CACHE}' 파일을 읽는 중 오류 발생: {e}")
+    except (json.JSONDecodeError, IOError):
+        # 파일이 손상되었거나 읽을 수 없는 경우
+        print(f"⚠️ 경고: '{PATH_KAKAO_IMAGE_CACHE}' 파일을 읽는 데 실패했습니다. 빈 캐시로 시작합니다.")
+        _IMAGE_CACHE = {}
 
     return _IMAGE_CACHE
-# ▲▲▲ MODIFIED SECTION ▲▲▲
+# ▲▲▲ 수정된 부분 ▲▲▲
+
 
 def _save_image_cache():
+    """메모리에 있는 이미지 캐시를 JSON 파일에 저장합니다."""
+    global _IMAGE_CACHE
+    if _IMAGE_CACHE is None:
+        return
     try:
         p = Path(PATH_KAKAO_IMAGE_CACHE)
-        p.write_text(json.dumps(_IMAGE_CACHE or {}, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception: pass
+        p.write_text(json.dumps(_IMAGE_CACHE, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"❌ 에러: 이미지 캐시 파일 저장 실패 - {e}")
+
 
 def _ensure_session():
     global _SESSION
@@ -225,23 +230,17 @@ def _kakao_image_search(query: str, size: int = 4) -> List[str]:
         return [u for u in urls if len(u) < 2000]
     except Exception: return []
 
-# app.py 의 _images_for_place 함수
-
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
+    # 이제 이 함수는 캐시에서 읽기만 합니다.
+    # 앱 시작 시 모든 정보가 캐시되므로 API 호출 로직이 필요 없습니다.
     cache = _load_image_cache()
     key = f"{_nfc(title)}|{_nfc(addr1)}"
     
-    # 1. 캐시에 키가 있는지 확인
     if key in cache:
-        # 2. 있으면 캐시 값을 즉시 반환 (API 호출 안 함!)
         return cache[key].get("urls", [])[:max_n]
     
-    # 3. 캐시에 없을 때만 API를 호출 (로컬 개발 환경에서만 발생)
-    q = " ".join([_nfc(title), *_addr_region_tokens(addr1)])
-    urls = _kakao_image_search(q, size=max_n)
-    cache[key] = {"q": q, "urls": urls, "ts": int(datetime.now().timestamp())}
-    _save_image_cache()
-    return urls
+    # 캐시에 없는 경우(이론상 발생하면 안됨), 빈 리스트 반환
+    return []
 
 def _kakao_geocode(query: str, addr1: str = "") -> Dict[str, Any] | None:
     if not KAKAO_API_KEY: return None
@@ -261,12 +260,92 @@ def _kakao_geocode(query: str, addr1: str = "") -> Dict[str, Any] | None:
     except Exception: pass
     return None
 
+# ▼▼▼ 새로운 함수: 앱 시작 시 이미지 캐시를 생성/업데이트 ▼▼▼
+def initialize_image_cache():
+    """
+    앱 시작 시 실행됩니다.
+    관광지 CSV를 읽어와 이미지 캐시 JSON 파일에 없는 항목만
+    카카오 API로 조회하여 캐시를 업데이트합니다.
+    """
+    print("--- 🖼️  이미지 캐시 초기화를 시작합니다 ---")
+    
+    if not KAKAO_API_KEY:
+        print("⛔️ KAKAO_API_KEY가 설정되지 않아 이미지 캐싱을 건너뜁니다.")
+        return
+
+    try:
+        # 1. 원본 CSV 데이터 로드
+        df = _load_places_df()
+        df = df[["title", "addr1"]].copy()
+        print(f"✅ 원본 CSV 로드 완료. 고유 장소 {len(df):,}개.")
+    except Exception as e:
+        print(f"⛔️ CSV 파일('{PATH_TMF}') 로드 실패: {e}")
+        return
+
+    # 2. 기존 캐시 파일 로드
+    cache = _load_image_cache()
+    print(f"✅ 기존 캐시 로드 완료. {len(cache):,}개 항목 존재.")
+
+    # 3. 캐시에 없는 새로운 항목 찾기
+    new_items_to_fetch = []
+    for _, row in df.iterrows():
+        title = _nfc(row["title"])
+        addr1 = _nfc(row["addr1"])
+        key = f"{title}|{addr1}"
+        if key not in cache:
+            new_items_to_fetch.append({"key": key, "title": title, "addr1": addr1})
+
+    if not new_items_to_fetch:
+        print("✨ 모든 장소의 이미지가 이미 캐시되어 있습니다. 동기화 완료!")
+        return
+
+    print(f"🚚 총 {len(new_items_to_fetch):,}개의 새로운 장소 이미지를 가져옵니다...")
+
+    # 4. API 호출 및 캐시 업데이트
+    new_items_count = 0
+    save_interval = 50  # 50개 항목마다 저장
+
+    # tqdm을 사용하여 진행률 바 표시
+    pbar = tqdm(new_items_to_fetch, total=len(new_items_to_fetch), desc="이미지 검색 중")
+    
+    for item in pbar:
+        key, title, addr1 = item["key"], item["title"], item["addr1"]
+        pbar.set_description(f"'{title[:10]}...' 검색")
+        
+        query = " ".join([title, *_addr_region_tokens(addr1)])
+        urls = _kakao_image_search(query, size=4)
+        
+        cache[key] = {
+            "q": query,
+            "urls": urls,
+            "ts": int(datetime.now().timestamp())
+        }
+        new_items_count += 1
+
+        time.sleep(0.05)  # API 과호출 방지
+
+        # 주기적으로 저장
+        if new_items_count > 0 and new_items_count % save_interval == 0:
+            _save_image_cache()
+            pbar.set_description(f"💾 중간 저장 완료")
+
+    # 5. 최종 저장
+    if new_items_count > 0:
+        _save_image_cache()
+        print(f"\n✅ {new_items_count}개 항목 추가 완료! 최종 캐시 크기: {len(cache):,}개.")
+    
+    print("--- ✅ 이미지 캐시 초기화 완료 ---")
+# ▲▲▲ 새로운 함수 끝 ▲▲▲
+
+
 # ─────────────────────────────────────────
 # Main Routes
 # ─────────────────────────────────────────
 @app.get("/")
 def home():
     return render_template("home.html")
+
+# ... (이하 라우트 함수들은 기존과 동일) ...
 
 @app.get("/chat")
 def index():
@@ -490,4 +569,18 @@ def img_proxy():
 
 
 if __name__ == "__main__":
+    # ▼▼▼ 수정된 부분: 앱 실행 전에 캐시 초기화 함수를 호출합니다. ▼▼▼
+    # tqdm 라이브러리가 없다면 설치 안내
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        print("="*50)
+        print("캐싱 스크립트를 실행하려면 'tqdm' 라이브러리가 필요합니다.")
+        print("터미널에서 아래 명령어를 실행하여 설치해주세요.")
+        print("pip install tqdm")
+        print("="*50)
+    
+    initialize_image_cache()
+    # ▲▲▲ 수정된 부분 ▲▲▲
+    
     app.run(host="0.0.0.0", port=5000, debug=True)
