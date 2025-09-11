@@ -93,34 +93,50 @@
 
     const showNav = slideParts.length > 1;
     const nav = showNav ? `<button class="cbtn prev" type="button" aria-label="이전">‹</button><button class="cbtn next" type="button" aria-label="다음">›</button>` : '';
+    
+    // [수정] container가 캐러셀 역할을 하도록 변경
     container.dataset.slide = '0';
     container.dataset.title = title;
     container.dataset.addr1 = addr1;
     container.innerHTML = `${nav}<div class="slides">${slideParts.join('')}</div>`;
+
     const fileInput = container.querySelector('.uploader-input');
     updateCarouselState(container, 0);
 
     async function doUpload(file){
       if (!file) return;
-      if (container.dataset.uploadedOnce === '1'){
-        alert('이 장소에는 이미 사진을 올리셨어요. 사용자당 1장만 가능합니다.');
+      
+      const card = container.closest('.place-card');
+      if (card.classList.contains('upload-locked')) {
+        alert('이 장소에는 이미 사진을 올리셨어요. 새로고침 후 다시 시도해주세요.');
         return;
       }
+
       try{
         const upSlide = container.querySelector('.uploader-slide');
         if (upSlide) upSlide.innerHTML = '<div class="image-uploader">업로드 중…</div>';
+
         const fd = new FormData();
         fd.append('file', file);
         fd.append('title', title);
         fd.append('addr1', addr1);
+
         const res = await fetch('/api/upload-image', { method:'POST', body: fd });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || '업로드 실패');
-        container.dataset.uploadedOnce = '1';
-        setupCarousel(container, json.images || [], title, addr1);
-      }catch(err){
+
+        // [수정] 업로드 성공 시, 서버에서 받은 최신 이미지 목록으로 캐러셀을 다시 렌더링
+        card.classList.add('upload-locked'); // 중복 업로드 방지
+        setupCarousel(container, json.images, title, addr1);
+        
+        // [수정] 새로 업로드된 이미지 슬라이드로 바로 이동
+        const newImageIndex = (json.images || []).length - 1;
+        updateCarouselState(container, newImageIndex);
+
+      } catch(err) {
         alert(err.message || '업로드 중 오류가 발생했습니다.');
-        setupCarousel(container, list, title, addr1);
+        // [수정] 실패 시, 원래 이미지 목록으로 캐러셀 복원
+        setupCarousel(container, images, title, addr1);
       }
     }
 
@@ -130,6 +146,7 @@
         const prev = e.target.closest('.cbtn.prev');
         const next = e.target.closest('.cbtn.next');
         if (!prev && !next) return;
+        
         const slidesEl = container.querySelector('.slides');
         if (!slidesEl) return;
         const slides = Array.from(slidesEl.querySelectorAll('.carousel-slide'));
@@ -147,13 +164,11 @@
   function cardHTML(item){
     const { rank, title, addr1, cat1, cat3, review_score, tour_score } = item;
     
-    // [수정] 현재 정렬 기준에 맞는 점수를 선택하고 100을 곱함
     let score = state.sort === 'review' ? review_score : tour_score;
     if (score !== null && typeof score !== 'undefined') {
       score *= 100;
     }
 
-    // [수정] 점수가 있을 경우에만 배지를 생성하고, 소수점 둘째 자리까지 표시
     const scoreBadgeHTML = (score !== null && typeof score !== 'undefined')
       ? `<div class="badge score-badge">${score.toFixed(2)}</div>`
       : '';
@@ -174,7 +189,6 @@
       </article>
     `;
   }
-
 
   function renderGrid(items){
     if (!grid) return;

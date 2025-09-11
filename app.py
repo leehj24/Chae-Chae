@@ -21,9 +21,6 @@ import unicodedata as ud
 import requests
 from werkzeug.utils import secure_filename
 
-# [수정] tqdm 라이브러리는 더 이상 시작 스크립트에 필요 없으므로 삭제 가능
-# from tqdm import tqdm 
-
 from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort, send_from_directory)
 from flask_session import Session
 
@@ -412,9 +409,6 @@ def _nearest_bus(lat, lon) -> str:
 # ─────────────────────────────────────────
 # Startup Functions
 # ─────────────────────────────────────────
-# [삭제] 메모리 초과 및 서버 시작 지연을 유발하는 전체 이미지 캐싱 함수 삭제
-# def initialize_image_cache(): ...
-
 def start_self_pinging():
     def self_ping_task():
         ping_url = os.environ.get("RENDER_EXTERNAL_URL")
@@ -575,28 +569,49 @@ def upload_image():
     addr1 = request.form.get('addr1')
     if 'file' not in request.files or not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
+
     file = request.files['file']
     if file.filename == '' or not _allowed_file(file.filename):
         return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
+
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-    uploaded_once_keys = set(session.get("uploaded_once_keys", []))
-    if key in uploaded_once_keys:
-        return _json({"ok": False, "error": "이미 이 장소에 사진을 올리셨어요. 사용자당 1장만 가능합니다."}, 400)
+    
+    # 세션당 1장 제한은 클라이언트에서 처리하므로 서버에서는 일단 제거하거나 주석처리
+    # uploaded_once_keys = set(session.get("uploaded_once_keys", []))
+    # if key in uploaded_once_keys:
+    #     return _json({"ok": False, "error": "이미 이 장소에 사진을 올리셨어요. 사용자당 1장만 가능합니다."}, 400)
+
     uploads = _load_user_uploads()
     current_images = uploads.get(key, [])
-    all_images_before_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=True)
+    
+    # 업로드 전 현재 합성 결과(업로드 포함) 확인하여 최대 4장 제한
+    # [수정] 이 로직은 이제 사용자 업로드를 포함하여 계산해야 합니다.
+    all_images_before_upload = _get_all_images_for_place(
+        title, addr1, include_user_uploads=True, auto_fetch_if_needed=False # 라이브 페치는 제외
+    )
     if len(all_images_before_upload) >= 4:
         return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
+
     ext = file.filename.rsplit('.', 1)[1].lower()
     filename = secure_filename(f"{uuid.uuid4()}.{ext}")
     file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
     current_images.append(filename)
     uploads[key] = current_images
     _save_user_uploads(uploads)
-    uploaded_once_keys.add(key)
-    session["uploaded_once_keys"] = list(uploaded_once_keys)
-    all_images_after_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=True)
+
+    # # 세션 마킹 부분도 주석 처리
+    # uploaded_once_keys.add(key)
+    # session["uploaded_once_keys"] = list(uploaded_once_keys)
+
+    # ▼▼▼ [수정된 부분] ▼▼▼
+    # 업로드 후, 사용자 업로드를 포함한 최신 이미지 목록을 가져와서 반환합니다.
+    all_images_after_upload = _get_all_images_for_place(
+        title, addr1, include_user_uploads=True, auto_fetch_if_needed=False
+    )
     return _json({"ok": True, "images": all_images_after_upload})
+    # ▲▲▲ [여기까지 수정] ▲▲▲
+
 
 @app.get("/api/places")
 def api_places():
@@ -644,8 +659,9 @@ def api_places():
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
+                # [수정] 홈 그리드에서는 사용자 업로드 이미지를 포함하여 보여줍니다.
                 all_images = _get_all_images_for_place(
-                    title, addr1, max_n=4, include_user_uploads=False, auto_fetch_if_needed=True
+                    title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
                 )
                 items_list.append({
                     "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
@@ -729,8 +745,5 @@ def img_proxy():
         return abort(502)
 
 if __name__ == "__main__":
-    # [삭제] 서버 시작 시 더 이상 전체 이미지 캐싱을 실행하지 않음
-    # initialize_image_cache() 
-    
     start_self_pinging()
     app.run(host="0.0.0.0", port=5000, debug=True)
