@@ -151,6 +151,63 @@ body{
 .tl-title .ico{ margin-right:6px; }
 .addr { color: var(--muted); font-size: 0.95rem; margin-bottom: 8px; }
 .tags { display:flex; gap:8px; flex-wrap:wrap; }
+
+/* 카드 액션(별점, 후기) 영역 스타일 */
+.card-actions {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.star-rating-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  transition: background-color .2s ease;
+}
+.star-rating-display:hover { background-color: var(--chip-bg); }
+.stars-outer {
+  position: relative;
+  display: inline-block;
+  font-size: 1rem;
+}
+.stars-outer::before { content: '☆☆☆☆☆'; color: #ccc; }
+.stars-inner {
+  position: absolute; top: 0; left: 0;
+  white-space: nowrap; overflow: hidden; width: 0%;
+}
+.stars-inner::before { content: '★★★★★'; color: #f8b400; }
+.rating-info {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.rating-avg { font-weight: 700; color: var(--text); }
+
+.review-btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--panel-2);
+  transition: all .2s ease;
+}
+.review-btn:hover {
+  background-color: var(--chip-bg);
+  border-color: #d0daee;
+  transform: translateY(-1px);
+}
+
 .chip{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--chip-bg); font-size:.85rem; font-weight: 600; color:#0f172a; }
 .chip.ghost{ background:#f8fafc }
 .chip.small{ font-size:0.8rem; padding: 4px 8px; }
@@ -167,7 +224,7 @@ body{
 }
 .no-map-placeholder{ background: #f7faff; }
 
-/* ▼▼▼ [추가된 부분] home.css와 동일한 캐러셀 스타일 ▼▼▼ */
+/* 캐러셀 스타일 */
 .media-carousel-container {
   position: relative;
 }
@@ -236,7 +293,6 @@ body{
 .up-ic{ font-size: 24px; line-height: 1; }
 .up-title{ font-size: 0.95rem; color: #0f172a; }
 .up-hint{ font-size: 0.8rem; color: var(--muted); font-weight: 600; }
-/* ▲▲▲ [여기까지 추가] ▲▲▲ */
 
 
 /* 반응형 */
@@ -252,3 +308,34 @@ body{
   padding:12px; border-radius:12px; text-align:center; color:#0f172a;
 }
 .error{ border-style:solid; border-color:#ef9a9a; color:#b71c1c }
+
+/* 별점/후기 모달 스타일 (home.css와 동일) */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background-color: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 100; display: flex; align-items: center; justify-content: center;
+  opacity: 0; visibility: hidden;
+  transition: opacity .2s ease, visibility .2s ease;
+}
+.modal-backdrop.visible { opacity: 1; visibility: visible; }
+.modal-content {
+  background: var(--panel); border-radius: 20px;
+  padding: 24px; width: 90%; max-width: 420px; box-shadow: var(--shadow);
+  transform: scale(0.95); transition: transform .2s ease;
+}
+.modal-backdrop.visible .modal-content { transform: scale(1); }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.modal-header h3 { margin: 0; font-size: 1.4rem; line-height: 1.3; }
+.modal-title-place { font-size: 0.95rem; color: var(--muted); font-weight: 600; display: block; margin-top: 4px; }
+.modal-close-btn { all: unset; box-sizing: border-box; cursor: pointer; width: 32px; height: 32px; display: grid; place-items: center; font-size: 1.5rem; line-height: 1; border-radius: 50%; color: var(--muted); }
+.modal-close-btn:hover { background-color: var(--chip-bg); }
+.rating-form .stars { font-size: 2.5rem; color: #ccc; cursor: pointer; text-align: center; margin: 12px 0; }
+.rating-form .star { transition: color .2s ease; display: inline-block; }
+.rating-form .star:hover,
+.rating-form .star.hover,
+.rating-form .star.selected { color: #f8b400; }
+.modal-actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+.modal-btn { all: unset; box-sizing: border-box; cursor: pointer; font-weight: 700; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); }
+.modal-btn.primary { background-color: var(--brand); color: white; border-color: var(--brand); }
+.modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }

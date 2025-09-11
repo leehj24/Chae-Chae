@@ -1,5 +1,4 @@
-# app.py
-from __future__ import annotations
+
 import json, time, traceback, re, os, threading, math, uuid
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +24,6 @@ BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.secret_key = "dev-secret-key"
 
-# ... (기존 설정 코드는 변경 없음) ...
 UPLOAD_FOLDER = str(BASE_DIR / "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
@@ -60,6 +58,13 @@ sido_map = {
     '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
 }
 MAX_MSGS = 30
+
+# ▼▼▼ [추가된 부분] 후기/별점 데이터 파일 경로 및 잠금 객체 ▼▼▼
+PATH_USER_REVIEWS = str(BASE_DIR / "_user_reviews.json")
+_USER_REVIEWS_CACHE = {"data": None, "mtime": None}
+_USER_REVIEWS_LOCK = threading.Lock()
+# ▲▲▲ [추가된 부분] ▲▲▲
+
 def _trim_msgs():
     session["messages"] = session.get("messages", [])[-MAX_MSGS:]
 def _json(payload: Dict[str, Any], status: int = 200) -> Response:
@@ -76,6 +81,11 @@ def _nfc(s: str) -> str:
 def _init_session_if_needed():
     if "state" not in session: session["state"] = "지역"
     if "messages" not in session or not session["messages"]: session["messages"] = [{"sender": "bot", "html": BOT_PROMPTS["지역"]}]
+    # ▼▼▼ [추가된 부분] 세션 ID가 없으면 생성 ▼▼▼
+    if 'user_id' not in session:
+        session['user_id'] = str(uuid.uuid4())
+    # ▲▲▲ [추가된 부분] ▲▲▲
+
 _PLACES_CACHE = {"df": None, "mtime": None, "path": None}
 def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
@@ -91,13 +101,27 @@ def _pick_column(df: pd.DataFrame, *names: str) -> str | None:
         for n in names:
             if n.lower() in cl: return c
     return None
+
 def _load_places_df() -> pd.DataFrame:
     path = PATH_TMF
     p = Path(path)
     mtime = p.stat().st_mtime if p.exists() else None
     if _PLACES_CACHE["df"] is not None and _PLACES_CACHE["mtime"] == mtime: return _PLACES_CACHE["df"].copy()
+    
     df = _read_csv_robust(path).copy()
-    req = {"title": _pick_column(df, "title", "명칭", "place", "name"), "addr1": _pick_column(df, "addr1", "주소"), "cat1": _pick_column(df, "cat1", "대분류", "category1"), "tour_score": _pick_column(df, "tour_score", "관광지수", "tour-score"), "review_score": _pick_column(df, "review_score", "인기도지수", "review-score"),}
+    
+    # ▼▼▼ [수정된 부분] mapx, mapy 컬럼도 필수로 포함하여 로드 ▼▼▼
+    req = {
+        "title": _pick_column(df, "title", "명칭", "place", "name"),
+        "addr1": _pick_column(df, "addr1", "주소"),
+        "cat1": _pick_column(df, "cat1", "대분류", "category1"),
+        "tour_score": _pick_column(df, "tour_score", "관광지수", "tour-score"),
+        "review_score": _pick_column(df, "review_score", "인기도지수", "review-score"),
+        "mapx": _pick_column(df, "mapx", "x", "lon", "longitude"),
+        "mapy": _pick_column(df, "mapy", "y", "lat", "latitude"),
+    }
+    # ▲▲▲ [수정된 부분] ▲▲▲
+
     if miss := [k for k, v in req.items() if v is None]: raise KeyError(f"Missing required CSV columns: {miss} / Found: {list(df.columns)}")
     opt = {"cat3": _pick_column(df, "cat3", "소분류", "category3"),"firstimage": _pick_column(df, "firstimage", "image", "img1", "thumbnail"),}
     rename_map = {v: k for k, v in req.items() if v}
@@ -106,7 +130,7 @@ def _load_places_df() -> pd.DataFrame:
     df = df.rename(columns=rename_map)
     for c in ("cat3", "firstimage"):
         if c not in df.columns: df[c] = ""
-    for c in ("tour_score", "review_score"):
+    for c in ("tour_score", "review_score", "mapx", "mapy"): # mapx, mapy 추가
         if c not in df.columns: df[c] = 0
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     for c in ("title", "addr1", "cat1", "cat3", "firstimage"):
@@ -114,6 +138,7 @@ def _load_places_df() -> pd.DataFrame:
     df = df.drop_duplicates(subset=["title", "addr1"], keep="first").reset_index(drop=True)
     _PLACES_CACHE.update({"df": df.copy(), "mtime": mtime, "path": path})
     return df
+
 def _sort_key_from_param(s: str) -> tuple[str, str]:
     s = (s or "").strip().lower()
     return ("review_score", "인기도 지수") if s in {"popular", "review", "review_score", "인기도"} else ("tour_score", "관광 지수")
@@ -122,6 +147,34 @@ _USER_UPLOADS_CACHE = {"data": None, "mtime": None}
 _USER_UPLOADS_LOCK = threading.Lock()
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# ▼▼▼ [추가된 부분] 후기/별점 데이터 로드 및 저장 함수 ▼▼▼
+def _load_user_reviews():
+    with _USER_REVIEWS_LOCK:
+        p = Path(PATH_USER_REVIEWS)
+        if not p.exists(): return {}
+        try:
+            mtime = p.stat().st_mtime
+            if _USER_REVIEWS_CACHE["data"] is not None and _USER_REVIEWS_CACHE["mtime"] == mtime:
+                return _USER_REVIEWS_CACHE["data"]
+            data = json.loads(p.read_text(encoding="utf-8"))
+            _USER_REVIEWS_CACHE["data"] = data
+            _USER_REVIEWS_CACHE["mtime"] = mtime
+            return data
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+def _save_user_reviews(data):
+    with _USER_REVIEWS_LOCK:
+        try:
+            p = Path(PATH_USER_REVIEWS)
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            _USER_REVIEWS_CACHE["data"] = None
+            _USER_REVIEWS_CACHE["mtime"] = None
+        except Exception as e:
+            print(f"❌ 에러: 사용자 후기 파일 저장 실패 - {e}")
+# ▲▲▲ [추가된 부분] ▲▲▲
+
 def _load_user_uploads():
     with _USER_UPLOADS_LOCK:
         p = Path(PATH_USER_UPLOADS)
@@ -228,6 +281,32 @@ def _nearest_bus(lat, lon) -> str:
                     if docs: return _nfc(docs[0].get("place_name"))
     except Exception: pass
     return ""
+
+# ▼▼▼ [추가된 부분] 카카오맵 장소 URL을 찾는 함수 ▼▼▼
+def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
+    if not KAKAO_API_KEY: return None
+    _ensure_session()
+    headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
+    params = {"query": title, "x": x, "y": y, "radius": 200, "sort": "accuracy"}
+    try:
+        res = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", headers=headers, params=params, timeout=3)
+        if not res.ok: return None
+        
+        docs = res.json().get("documents", [])
+        if not docs: return None
+        
+        # 이름이 가장 유사한 장소를 우선 선택
+        clean_title = title.replace('_', ' ')
+        for place in docs:
+            if clean_title in place.get("place_name", ""):
+                return place.get("place_url")
+        
+        # 유사한 이름이 없으면 첫 번째 결과를 반환
+        return docs[0].get("place_url")
+    except requests.exceptions.RequestException:
+        return None
+# ▲▲▲ [추가된 부분] ▲▲▲
+
 def start_self_pinging():
     def self_ping_task():
         ping_url = os.environ.get("RENDER_EXTERNAL_URL")
@@ -313,6 +392,7 @@ def upload_image():
     ext = file.filename.rsplit('.', 1)[1].lower(); filename = secure_filename(f"{uuid.uuid4()}.{ext}"); file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
     current_images.append(filename); uploads[key] = current_images; _save_user_uploads(uploads)
     all_images_after_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=False); return _json({"ok": True, "images": all_images_after_upload})
+
 @app.get("/api/places")
 def api_places():
     try:
@@ -332,11 +412,20 @@ def api_places():
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                # ▼▼▼ [수정] home.html에서도 사용자 업로드 이미지를 포함하여 보여주도록 변경 ▼▼▼
                 all_images = _get_all_images_for_place(
                     title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
                 )
-                items_list.append({"rank": int(r.get("rank", 0)), "title": title, "addr1": addr1, "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")), "images": all_images, "tour_score":   r.get("tour_score") if pd.notna(r.get("tour_score")) else None, "review_score": r.get("review_score") if pd.notna(r.get("review_score")) else None,})
+                # ▼▼▼ [수정] mapx, mapy도 반환값에 포함 ▼▼▼
+                items_list.append({
+                    "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
+                    "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")),
+                    "images": all_images,
+                    "tour_score":   r.get("tour_score") if pd.notna(r.get("tour_score")) else None,
+                    "review_score": r.get("review_score") if pd.notna(r.get("review_score")) else None,
+                    "mapx": r.get("mapx") if pd.notna(r.get("mapx")) else None,
+                    "mapy": r.get("mapy") if pd.notna(r.get("mapy")) else None,
+                })
+                # ▲▲▲ [수정] ▲▲▲
             return items_list
         return _json({"ok": True, "sort_label": score_label, "sort_col": score_col, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages, "items": process_view_to_items(view),})
     except Exception as e: print("❌ API Error in /api/places:"); traceback.print_exc(); return _json({"ok": False, "error": str(e)}, 500)
@@ -347,6 +436,79 @@ def api_place_media():
     images = _get_all_images_for_place(title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True); coords = _kakao_geocode_coords(title, addr1); payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords: payload["coords"] = {"y": coords[0], "x": coords[1]}
     return _json(payload)
+
+# ▼▼▼ [추가된 부분] 장소 상세 정보(후기, 별점, 카카오 URL) API ▼▼▼
+@app.get("/api/place-details")
+def api_place_details():
+    _init_session_if_needed()
+    title = _nfc(request.args.get("title", ""))
+    addr1 = _nfc(request.args.get("addr1", ""))
+    mapx = request.args.get("mapx", "")
+    mapy = request.args.get("mapy", "")
+
+    if not title or not addr1:
+        return _json({"ok": False, "error": "title, addr1이 필요합니다."}, 400)
+
+    # 1. 카카오맵 장소 URL 가져오기
+    kakao_url = _get_kakao_place_url(title, mapx, mapy)
+
+    # 2. 후기 및 별점 정보 처리
+    key = f"{title}|{addr1}"
+    reviews_db = _load_user_reviews()
+    place_reviews = reviews_db.get(key, {})
+    
+    ratings = place_reviews.get("ratings", {})
+    
+    avg_rating = 0
+    total_ratings = 0
+    if ratings:
+        total_ratings = len(ratings)
+        avg_rating = sum(ratings.values()) / total_ratings if total_ratings > 0 else 0
+
+    my_rating = ratings.get(session.get('user_id'))
+    
+    # reviews = place_reviews.get("reviews", {})
+    # my_review = reviews.get(session.get('user_id'))
+
+    return _json({
+        "ok": True,
+        "kakao_url": kakao_url,
+        "avg_rating": avg_rating,
+        "total_ratings": total_ratings,
+        "my_rating": my_rating,
+    })
+
+@app.post("/api/submit-review")
+def api_submit_review():
+    _init_session_if_needed()
+    data = request.json
+    title = _nfc(data.get("title", ""))
+    addr1 = _nfc(data.get("addr1", ""))
+    rating = data.get("rating")
+
+    if not title or not addr1 or rating is None:
+        return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
+    
+    try:
+        rating_val = int(rating)
+        if not (1 <= rating_val <= 5):
+            raise ValueError()
+    except (ValueError, TypeError):
+        return _json({"ok": False, "error": "별점은 1-5 사이의 정수여야 합니다."}, 400)
+
+    key = f"{title}|{addr1}"
+    user_id = session.get('user_id')
+
+    reviews_db = _load_user_reviews()
+    if key not in reviews_db:
+        reviews_db[key] = {"ratings": {}, "reviews": {}}
+    
+    reviews_db[key]["ratings"][user_id] = rating_val
+    _save_user_reviews(reviews_db)
+
+    return _json({"ok": True, "message": "별점이 저장되었습니다."})
+# ▲▲▲ [추가된 부분] ▲▲▲
+
 @app.get("/api/geocode")
 def api_geocode():
     title = (request.args.get("title") or "").strip(); addr = (request.args.get("addr") or "").strip()

@@ -180,7 +180,36 @@
     </section>
   </main>
 
-  <script src="{{ url_for('static', filename='js/home.js') }}?v=6"></script>
+  <div id="ratingModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-content">
+      <header class="modal-header">
+        <div>
+          <h3 id="modalTitle">별점 남기기</h3>
+          <span id="modalPlaceTitle" class="modal-title-place"></span>
+        </div>
+        <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+      </header>
+      <div class="modal-body">
+        <form id="ratingForm" class="rating-form">
+          <div class="stars" data-rating="0">
+            <span class="star" data-value="1">★</span>
+            <span class="star" data-value="2">★</span>
+            <span class="star" data-value="3">★</span>
+            <span class="star" data-value="4">★</span>
+            <span class="star" data-value="5">★</span>
+          </div>
+          <input type="hidden" name="rating" id="ratingInput" value="0">
+        </form>
+      </div>
+      <footer class="modal-actions">
+        <button type="button" class="modal-btn modal-close-btn">취소</button>
+        <button type="button" id="submitRatingBtn" class="modal-btn primary" disabled>저장</button>
+      </footer>
+    </div>
+  </div>
+
+
+  <script src="{{ url_for('static', filename='js/home.js') }}?v=7"></script>
 
   <noscript>
     <div style="max-width:1100px;margin:24px auto;padding:12px;border:1px solid #ccc;border-radius:12px">

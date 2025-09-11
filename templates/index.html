@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=10" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -62,6 +62,17 @@
                             <div class="tags">
                               {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
                               {% if r.cat3 %}<span class="chip ghost">{{ r.cat3 }}</span>{% endif %}
+                            </div>
+                            <div class="card-actions">
+                              <div class="star-rating-display" role="button" tabindex="0">
+                                <div class="stars-outer">
+                                  <div class="stars-inner"></div>
+                                </div>
+                                <span class="rating-info">
+                                  <span class="rating-avg">…</span> (<span class="rating-count">…</span>)
+                                </span>
+                              </div>
+                              <button type="button" class="review-btn">후기 보기/작성</button>
                             </div>
                           {% else %}
                             <h4 class="tl-title">🚇 이동</h4>
@@ -140,7 +151,36 @@
     </div>
   </main>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}?v=3"></script>
+  <div id="ratingModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-content">
+      <header class="modal-header">
+        <div>
+          <h3 id="modalTitle">별점 남기기</h3>
+          <span id="modalPlaceTitle" class="modal-title-place"></span>
+        </div>
+        <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+      </header>
+      <div class="modal-body">
+        <form id="ratingForm" class="rating-form">
+          <div class="stars" data-rating="0">
+            <span class="star" data-value="1">★</span>
+            <span class="star" data-value="2">★</span>
+            <span class="star" data-value="3">★</span>
+            <span class="star" data-value="4">★</span>
+            <span class="star" data-value="5">★</span>
+          </div>
+          <input type="hidden" name="rating" id="ratingInput" value="0">
+        </form>
+      </div>
+      <footer class="modal-actions">
+        <button type="button" class="modal-btn modal-close-btn">취소</button>
+        <button type="button" id="submitRatingBtn" class="modal-btn primary" disabled>저장</button>
+      </footer>
+    </div>
+  </div>
+
+
+  <script src="{{ url_for('static', filename='js/app.js') }}?v=4"></script>
   
   {% if kakao_js_key %}
   <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&libraries=services"></script>
@@ -148,7 +188,6 @@
 
   
   <script>
-    // ▼▼▼ [수정된 부분] home.js와 동일한 로직으로 전체 스크립트 변경 ▼▼▼
     document.addEventListener('DOMContentLoaded', () => {
       const chatWindow = document.getElementById('chat-window');
       if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
@@ -358,6 +397,152 @@
           }
         } catch {}
       }
+      
+      const ratingModal = document.getElementById('ratingModal');
+      const modalPlaceTitle = document.getElementById('modalPlaceTitle');
+      const ratingFormStars = ratingModal.querySelector('.stars');
+      const submitRatingBtn = document.getElementById('submitRatingBtn');
+      let currentRatingTarget = null;
+
+      function updateStarRatingUI(starDisplayElement, avgRating, totalRatings) {
+        const avg = avgRating || 0;
+        const total = totalRatings || 0;
+        const inner = starDisplayElement.querySelector('.stars-inner');
+        const avgEl = starDisplayElement.querySelector('.rating-avg');
+        const countEl = starDisplayElement.querySelector('.rating-count');
+
+        if (inner) inner.style.width = `${(avg / 5) * 100}%`;
+        if (avgEl) avgEl.textContent = avg.toFixed(1);
+        if (countEl) countEl.textContent = total;
+      }
+
+      function setStarsInModal(rating) {
+        const stars = ratingFormStars.querySelectorAll('.star');
+        stars.forEach(star => {
+          star.classList.toggle('selected', star.dataset.value <= rating);
+        });
+        ratingFormStars.dataset.rating = rating;
+        submitRatingBtn.disabled = rating == 0;
+      }
+      
+      ratingFormStars.addEventListener('mouseover', e => {
+        if (e.target.classList.contains('star')) {
+          const rating = e.target.dataset.value;
+          const stars = ratingFormStars.querySelectorAll('.star');
+          stars.forEach(star => {
+            star.classList.toggle('hover', star.dataset.value <= rating);
+          });
+        }
+      });
+
+      ratingFormStars.addEventListener('mouseout', () => {
+        const currentRating = ratingFormStars.dataset.rating;
+        setStarsInModal(currentRating);
+      });
+      
+      ratingFormStars.addEventListener('click', e => {
+        if (e.target.classList.contains('star')) {
+          const rating = e.target.dataset.value;
+          setStarsInModal(rating);
+        }
+      });
+      
+      function openRatingModal(targetCard) {
+        currentRatingTarget = targetCard;
+        const title = targetCard.dataset.title;
+        modalPlaceTitle.textContent = title;
+        
+        fetchPlaceDetails(targetCard).then(data => {
+            setStarsInModal(data.my_rating || 0);
+        });
+
+        ratingModal.classList.add('visible');
+      }
+
+      function closeRatingModal() {
+        ratingModal.classList.remove('visible');
+        currentRatingTarget = null;
+        setStarsInModal(0);
+      }
+      
+      ratingModal.querySelectorAll('.modal-close-btn').forEach(btn => {
+        btn.addEventListener('click', closeRatingModal);
+      });
+
+      submitRatingBtn.addEventListener('click', async () => {
+        if (!currentRatingTarget) return;
+
+        const title = currentRatingTarget.dataset.title;
+        const addr1 = currentRatingTarget.dataset.addr1;
+        const rating = ratingFormStars.dataset.rating;
+
+        try {
+          const res = await fetch('/api/submit-review', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ title, addr1, rating }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error || '저장 실패');
+          
+          fetchPlaceDetails(currentRatingTarget, true);
+          closeRatingModal();
+
+        } catch (err) {
+          alert(err.message || '저장 중 오류 발생');
+        }
+      });
+      
+      async function fetchPlaceDetails(cardElement, forceRefresh = false) {
+        if (cardElement.dataset.detailsLoaded && !forceRefresh) {
+            return JSON.parse(cardElement.dataset.detailsLoaded);
+        }
+        
+        const title = cardElement.dataset.title;
+        const addr1 = cardElement.dataset.addr1;
+        const mapx = cardElement.dataset.mapx || '';
+        const mapy = cardElement.dataset.mapy || '';
+
+        const params = new URLSearchParams({ title, addr1, mapx, mapy });
+        try {
+            const res = await fetch(`/api/place-details?${params.toString()}`);
+            const data = await res.json();
+            if (!data.ok) throw new Error('정보 로드 실패');
+            
+            cardElement.dataset.detailsLoaded = JSON.stringify(data);
+            const starDisplay = cardElement.querySelector('.star-rating-display');
+            if (starDisplay) {
+                updateStarRatingUI(starDisplay, data.avg_rating, data.total_ratings);
+            }
+            return data;
+        } catch (e) {
+            console.error('장소 상세 정보 로드 실패:', title, e);
+            const starDisplay = cardElement.querySelector('.star-rating-display');
+            if (starDisplay) updateStarRatingUI(starDisplay, 0, 0);
+            return { kakao_url: null, avg_rating: 0, total_ratings: 0, my_rating: 0 };
+        }
+      }
+
+      chatWindow.addEventListener('click', async e => {
+        const starDisplay = e.target.closest('.star-rating-display');
+        const reviewBtn = e.target.closest('.review-btn');
+        const targetCard = e.target.closest('.tl-item.visit');
+
+        if (!targetCard) return;
+
+        if (starDisplay) {
+          openRatingModal(targetCard);
+        } else if (reviewBtn) {
+          const details = await fetchPlaceDetails(targetCard);
+          if (details.kakao_url) {
+            window.open(details.kakao_url, '_blank');
+          } else {
+            if (confirm('이 장소에 대한 후기 정보가 아직 없습니다. 별점을 남기시겠어요?')) {
+              openRatingModal(targetCard);
+            }
+          }
+        }
+      });
 
       async function initializeAllItems() {
         const allItems = document.querySelectorAll('li.tl-item');
@@ -383,6 +568,8 @@
             
             setupCarousel(carouselContainer, images, title, addr);
             setupMap(mapContainer, coords, title);
+
+            fetchPlaceDetails(item);
 
           } else if (item.classList.contains('move')) {
             const detailsEl = item.querySelector('.move-details');

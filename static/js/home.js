@@ -29,6 +29,12 @@
   const orderTrigger  = orderDropdown?.querySelector('.sort-trigger');
   const orderMenu     = orderDropdown?.querySelector('.sort-menu');
 
+  const ratingModal = $('#ratingModal');
+  const modalPlaceTitle = $('#modalPlaceTitle');
+  const ratingFormStars = ratingModal?.querySelector('.stars');
+  const submitRatingBtn = $('#submitRatingBtn');
+  let currentRatingTarget = null;
+
   // ─────────────────────────────────────────────
   // 캐러셀 유틸 (홈 카드 전용)
   // ─────────────────────────────────────────────
@@ -127,8 +133,6 @@
         card.classList.add('upload-locked');
         setupCarousel(container, json.images, title, addr1);
         
-        // 새로 업로드된 이미지 슬라이드로 바로 이동합니다.
-        // `json.images`는 이제 업로드된 이미지를 포함한 전체 목록입니다.
         const newImageIndex = json.images.length - (json.images.length < 4 ? 1 : 0);
         updateCarouselState(container, Math.max(0, newImageIndex - 1));
 
@@ -140,7 +144,6 @@
 
     if (fileInput) fileInput.addEventListener('change', (e)=> doUpload(e.target.files?.[0]));
     
-    // 이벤트 리스너를 한 번만 등록하도록 이 위치로 이동합니다.
     if (!container.dataset.listenerAttached) {
       container.dataset.listenerAttached = 'true';
       container.addEventListener('click', (e)=>{
@@ -166,10 +169,53 @@
     }
   }
 
-  // ... (이하 나머지 코드는 이전과 동일) ...
+  // 별점 UI 업데이트 함수
+  function updateStarRatingUI(starDisplayElement, avgRating, totalRatings) {
+    const avg = avgRating || 0;
+    const total = totalRatings || 0;
+    const inner = starDisplayElement.querySelector('.stars-inner');
+    const avgEl = starDisplayElement.querySelector('.rating-avg');
+    const countEl = starDisplayElement.querySelector('.rating-count');
+
+    if (inner) inner.style.width = `${(avg / 5) * 100}%`;
+    if (avgEl) avgEl.textContent = avg.toFixed(1);
+    if (countEl) countEl.textContent = total;
+  }
+
+  // 장소 상세 정보(별점, 카카오URL 등) 가져오기
+  async function fetchPlaceDetails(cardElement, forceRefresh = false) {
+      if (cardElement.dataset.detailsLoaded && !forceRefresh) {
+          return JSON.parse(cardElement.dataset.detailsLoaded);
+      }
+      
+      const title = cardElement.dataset.title;
+      const addr1 = cardElement.dataset.addr1;
+      const mapx = cardElement.dataset.mapx;
+      const mapy = cardElement.dataset.mapy;
+
+      const params = new URLSearchParams({ title, addr1, mapx, mapy });
+      try {
+          const res = await fetch(`/api/place-details?${params.toString()}`);
+          const data = await res.json();
+          if (!data.ok) throw new Error('정보 로드 실패');
+          
+          cardElement.dataset.detailsLoaded = JSON.stringify(data);
+          const starDisplay = cardElement.querySelector('.star-rating-display');
+          if (starDisplay) {
+              updateStarRatingUI(starDisplay, data.avg_rating, data.total_ratings);
+          }
+          return data;
+      } catch (e) {
+          console.error('장소 상세 정보 로드 실패:', title, e);
+          const starDisplay = cardElement.querySelector('.star-rating-display');
+          if (starDisplay) updateStarRatingUI(starDisplay, 0, 0);
+          return { kakao_url: null, avg_rating: 0, total_ratings: 0, my_rating: 0 };
+      }
+  }
+
 
   function cardHTML(item){
-    const { rank, title, addr1, cat1, cat3, review_score, tour_score } = item;
+    const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy } = item;
     
     let score = state.sort === 'review' ? review_score : tour_score;
     if (score !== null && typeof score !== 'undefined') {
@@ -181,7 +227,7 @@
       : '';
 
     return `
-      <article class="place-card">
+      <article class="place-card" data-title="${title}" data-addr1="${addr1}" data-mapx="${mapx}" data-mapy="${mapy}">
         <div class="rank">#${rank}</div>
         ${scoreBadgeHTML}
         <div class="carousel" aria-label="${title} 이미지 프레임"><div class="slides"></div></div>
@@ -191,6 +237,17 @@
           <div class="tags">
             ${cat1 ? `<span class="chip">${cat1}</span>` : ''}
             ${cat3 ? `<span class="chip">${cat3}</span>` : ''}
+          </div>
+          <div class="card-actions">
+            <div class="star-rating-display" role="button" tabindex="0" aria-label="별점주기">
+              <div class="stars-outer">
+                <div class="stars-inner"></div>
+              </div>
+              <span class="rating-info">
+                <span class="rating-avg">…</span> (<span class="rating-count">…</span>)
+              </span>
+            </div>
+            <button type="button" class="review-btn">후기 보기</button>
           </div>
         </div>
       </article>
@@ -209,6 +266,8 @@
       const card = cards[idx];
       const frame = card.querySelector('.carousel');
       setupCarousel(frame, item.images || [], item.title || '', item.addr1 || '');
+      
+      fetchPlaceDetails(card);
     });
   }
 
@@ -309,6 +368,92 @@
         trigger.setAttribute('aria-expanded', 'false');
       }
     });
+  }
+  
+  if (ratingModal) {
+      const setStarsInModal = (rating) => {
+        const stars = ratingFormStars.querySelectorAll('.star');
+        stars.forEach(star => {
+          star.classList.toggle('selected', star.dataset.value <= rating);
+        });
+        ratingFormStars.dataset.rating = rating;
+        submitRatingBtn.disabled = rating == 0;
+      };
+
+      ratingFormStars.addEventListener('mouseover', e => {
+        if (e.target.classList.contains('star')) {
+          const rating = e.target.dataset.value;
+          const stars = ratingFormStars.querySelectorAll('.star');
+          stars.forEach(star => {
+            star.classList.toggle('hover', star.dataset.value <= rating);
+          });
+        }
+      });
+      ratingFormStars.addEventListener('mouseout', () => {
+        const currentRating = ratingFormStars.dataset.rating;
+        setStarsInModal(currentRating);
+      });
+      
+      ratingFormStars.addEventListener('click', e => {
+        if (e.target.classList.contains('star')) {
+          setStarsInModal(e.target.dataset.value);
+        }
+      });
+
+      const openRatingModal = (targetCard) => {
+        currentRatingTarget = targetCard;
+        modalPlaceTitle.textContent = targetCard.dataset.title;
+        fetchPlaceDetails(targetCard).then(data => setStarsInModal(data.my_rating || 0));
+        ratingModal.classList.add('visible');
+      };
+
+      const closeRatingModal = () => {
+        ratingModal.classList.remove('visible');
+        currentRatingTarget = null;
+        setStarsInModal(0);
+      };
+
+      ratingModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeRatingModal));
+
+      submitRatingBtn.addEventListener('click', async () => {
+        if (!currentRatingTarget) return;
+        const { title, addr1, mapx, mapy } = currentRatingTarget.dataset;
+        const rating = ratingFormStars.dataset.rating;
+
+        try {
+          const res = await fetch('/api/submit-review', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ title, addr1, rating, mapx, mapy }),
+          });
+          const json = await res.json();
+          if (!json.ok) throw new Error(json.error || '저장 실패');
+          
+          fetchPlaceDetails(currentRatingTarget, true);
+          closeRatingModal();
+        } catch (err) {
+          alert(err.message || '저장 중 오류 발생');
+        }
+      });
+
+      grid.addEventListener('click', async (e) => {
+        const card = e.target.closest('.place-card');
+        if (!card) return;
+
+        if (e.target.closest('.star-rating-display')) {
+          openRatingModal(card);
+        }
+        if (e.target.closest('.review-btn')) {
+          const details = await fetchPlaceDetails(card);
+          if (details.kakao_url) {
+            window.open(details.kakao_url, '_blank');
+          } else {
+            if (confirm('이 장소에 대한 후기 정보가 아직 없습니다. 별점을 남기시겠어요?')) {
+              openRatingModal(card);
+            }
+          }
+        }
+      });
   }
 
   setupDropdown(sortDropdown, sortTrigger, sortMenu, 'sort');
