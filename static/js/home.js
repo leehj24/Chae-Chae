@@ -94,7 +94,6 @@
     const showNav = slideParts.length > 1;
     const nav = showNav ? `<button class="cbtn prev" type="button" aria-label="이전">‹</button><button class="cbtn next" type="button" aria-label="다음">›</button>` : '';
     
-    // [수정] container가 캐러셀 역할을 하도록 변경
     container.dataset.slide = '0';
     container.dataset.title = title;
     container.dataset.addr1 = addr1;
@@ -125,23 +124,25 @@
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || '업로드 실패');
 
-        // [수정] 업로드 성공 시, 서버에서 받은 최신 이미지 목록으로 캐러셀을 다시 렌더링
-        card.classList.add('upload-locked'); // 중복 업로드 방지
+        card.classList.add('upload-locked');
         setupCarousel(container, json.images, title, addr1);
         
-        // [수정] 새로 업로드된 이미지 슬라이드로 바로 이동
-        const newImageIndex = (json.images || []).length - 1;
-        updateCarouselState(container, newImageIndex);
+        // 새로 업로드된 이미지 슬라이드로 바로 이동합니다.
+        // `json.images`는 이제 업로드된 이미지를 포함한 전체 목록입니다.
+        const newImageIndex = json.images.length - (json.images.length < 4 ? 1 : 0);
+        updateCarouselState(container, Math.max(0, newImageIndex - 1));
 
       } catch(err) {
         alert(err.message || '업로드 중 오류가 발생했습니다.');
-        // [수정] 실패 시, 원래 이미지 목록으로 캐러셀 복원
         setupCarousel(container, images, title, addr1);
       }
     }
 
     if (fileInput) fileInput.addEventListener('change', (e)=> doUpload(e.target.files?.[0]));
-    if (showNav){
+    
+    // 이벤트 리스너를 한 번만 등록하도록 이 위치로 이동합니다.
+    if (!container.dataset.listenerAttached) {
+      container.dataset.listenerAttached = 'true';
       container.addEventListener('click', (e)=>{
         const prev = e.target.closest('.cbtn.prev');
         const next = e.target.closest('.cbtn.next');
@@ -149,18 +150,24 @@
         
         const slidesEl = container.querySelector('.slides');
         if (!slidesEl) return;
+        
         const slides = Array.from(slidesEl.querySelectorAll('.carousel-slide'));
         const cur = parseInt(container.dataset.slide || '0', 10);
         const lastIdx = slides.length - 1;
-        if (prev){ updateCarouselState(container, cur - 1); return; }
-        if (next){ const nextIdx = Math.min(cur + 1, lastIdx); updateCarouselState(container, nextIdx); }
+        
+        if (prev){ 
+          updateCarouselState(container, cur - 1);
+        }
+        if (next){ 
+          const nextIdx = Math.min(cur + 1, lastIdx);
+          updateCarouselState(container, nextIdx); 
+        }
       });
     }
   }
 
-  // ─────────────────────────────────────────────
-  // 렌더링
-  // ─────────────────────────────────────────────
+  // ... (이하 나머지 코드는 이전과 동일) ...
+
   function cardHTML(item){
     const { rank, title, addr1, cat1, cat3, review_score, tour_score } = item;
     
@@ -227,9 +234,6 @@
     nextPagesBtn.onclick = ()=>{ state.page = Math.min(totalPages, end + 1); load(); };
   }
 
-  // ─────────────────────────────────────────────
-  // 상태 & 로딩
-  // ─────────────────────────────────────────────
   const state = {
     page: 1, per_page: 40,
     sort: sortDropdown?.dataset.current || 'review',
@@ -274,18 +278,12 @@
     }
   }
 
-  // ─────────────────────────────────────────────
-  // 이벤트 바인딩
-  // ─────────────────────────────────────────────
-  
   function setupDropdown(dropdown, trigger, menu, stateKey) {
     if (!dropdown || !trigger || !menu) return;
-
     trigger.addEventListener('click', () => {
       dropdown.classList.toggle('open');
       trigger.setAttribute('aria-expanded', String(dropdown.classList.contains('open')));
     });
-
     menu.querySelectorAll('[role="option"]').forEach(opt => {
       opt.addEventListener('click', () => {
         const val = opt.dataset.value;
@@ -305,7 +303,6 @@
         load();
       });
     });
-
     document.addEventListener('click', (e) => {
       if (!dropdown.contains(e.target)) {
         dropdown.classList.remove('open');

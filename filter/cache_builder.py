@@ -2,7 +2,7 @@
 import time
 import re
 from pathlib import Path
-from typing import List, Dict
+from typing import List
 from datetime import datetime
 
 import requests
@@ -10,16 +10,12 @@ import pandas as pd
 import unicodedata as ud
 from tqdm import tqdm
 
-# app.py와 동일한 설정 및 헬퍼 함수들을 가져옵니다.
 from recommend.config import (
     PATH_TMF,
     KAKAO_API_KEY,
     PATH_KAKAO_IMAGE_CACHE,
 )
 
-# ----------------------------------------------------
-# app.py에서 가져온 헬퍼 함수들 (API 호출 및 데이터 처리용)
-# ----------------------------------------------------
 _IMAGE_CACHE: dict[str, dict] | None = None
 _SESSION: requests.Session | None = None
 DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -85,56 +81,58 @@ def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     cache[key] = { "q": query, "urls": urls, "ts": int(datetime.now().timestamp()) }
     return urls
 
-# ----------------------------------------------------
-# 메인 캐시 빌더 함수
-# ----------------------------------------------------
-def build_cache():
-    print("--- 🖼️  이미지 캐시 빌드를 시작합니다 ---")
+# ▼▼▼ [수정] 이 파일을 직접 실행하지 않고 app.py에서 호출할 함수로 변경 ▼▼▼
+def update_cache_if_needed():
+    """
+    백그라운드에서 실행될 캐시 업데이트 함수.
+    """
+    print("--- 🖼️  백그라운드 이미지 캐시 업데이트 확인 시작 ---")
     if not KAKAO_API_KEY:
-        print("⛔️ KAKAO_API_KEY가 설정되지 않아 캐싱을 중단합니다. .env 파일을 확인해주세요.")
+        print("⛔️ KAKAO_API_KEY가 없어 캐싱을 건너뜁니다.")
         return
 
     try:
-        df = pd.read_csv(PATH_TMF, encoding='utf-8')
-        df = df[["title", "addr1"]].copy()
-        print(f"✅ 원본 CSV 로드 완료. 고유 장소 {len(df):,}개.")
+        df = pd.read_csv(PATH_TMF, usecols=["title", "addr1"], encoding='utf-8')
+        df.dropna(inplace=True)
     except Exception as e:
         print(f"⛔️ CSV 파일('{PATH_TMF}') 로드 실패: {e}")
         return
 
     cache = _load_image_cache()
-    print(f"✅ 기존 캐시 로드 완료. {len(cache):,}개 항목 존재.")
+    print(f"✅ 현재 캐시 크기: {len(cache):,}개")
 
     new_items_to_fetch = []
+    
+    # CSV의 모든 항목을 순회하며 캐시에 없는 항목 찾기
     for _, row in df.iterrows():
-        title, addr1 = _nfc(row["title"]), _nfc(row["addr1"])
+        title, addr1 = _nfc(row.get("title")), _nfc(row.get("addr1"))
+        if not title or not addr1:
+            continue
         key = f"{title}|{addr1}"
         if key not in cache:
-            new_items_to_fetch.append({"key": key, "title": title, "addr1": addr1})
+            new_items_to_fetch.append({"title": title, "addr1": addr1})
 
     if not new_items_to_fetch:
-        print("✨ 모든 장소의 이미지가 이미 캐시되어 있습니다. 동기화 완료!")
+        print("✨ 새로운 항목 없음. 캐시가 최신 상태입니다.")
         return
 
     print(f"🚚 총 {len(new_items_to_fetch):,}개의 새로운 장소 이미지를 가져옵니다...")
     
     save_interval = 50
-    with tqdm(total=len(new_items_to_fetch), desc="이미지 검색 중") as pbar:
-        for i, item in enumerate(new_items_to_fetch):
-            key, title, addr1 = item["key"], item["title"], item["addr1"]
-            pbar.set_description(f"'{title[:10]}...' 검색")
-            
-            _fetch_and_cache_images_live(title, addr1)
-            time.sleep(0.05) 
+    for i, item in enumerate(new_items_to_fetch):
+        title, addr1 = item["title"], item["addr1"]
+        print(f"  -> [{i+1}/{len(new_items_to_fetch)}] '{title}' 이미지 검색 중...")
+        
+        _fetch_and_cache_images_live(title, addr1)
+        time.sleep(0.1) # API 속도 제한 준수를 위해 약간의 딜레이 추가
 
-            if (i + 1) % save_interval == 0:
-                _save_image_cache()
-                pbar.set_postfix_str("💾 중간 저장 완료")
-            
-            pbar.update(1)
+        if (i + 1) % save_interval == 0:
+            _save_image_cache()
+            print(f"💾 중간 저장 완료 ({i+1}개 처리)")
 
     _save_image_cache()
-    print(f"\n✅ 캐시 빌드 완료! {len(new_items_to_fetch)}개 항목 추가. 최종 캐시 크기: {len(_load_image_cache()):,}개.")
+    print(f"\n✅ 캐시 업데이트 완료! {len(new_items_to_fetch)}개 항목 추가. 최종 캐시 크기: {len(_load_image_cache()):,}개.")
 
+# 직접 실행했을 때의 동작은 그대로 유지 (테스트용)
 if __name__ == "__main__":
-    build_cache()
+    update_cache_if_needed()
