@@ -156,104 +156,94 @@ body{
 .chip.small{ font-size:0.8rem; padding: 4px 8px; }
 .move-details{ display:flex; flex-wrap:wrap; gap: 8px; align-items: center; margin-top: 8px; }
 
-/* Media 2-Column on desktop */
 .tl-content-wrapper { display: flex; gap: 16px; align-items: flex-start; }
 .tl-text-content { flex: 1 1 40%; min-width: 0; }
 .tl-media-content { flex: 0 0 60%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; position: sticky; top: 70px; }
 .media-carousel-container, .kakao-map-container { width: 100%; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); background-color: #f0f4ff; aspect-ratio: 4 / 3; }
 
-/* Placeholders for no content */
 .media-loading, .no-image-placeholder, .no-map-placeholder {
   display: flex; align-items: center; justify-content: center;
   width: 100%; height: 100%; font-weight: 700; color: var(--muted); font-size: 0.9rem; text-align: center;
 }
 .no-map-placeholder{ background: #f7faff; }
 
-/* ───────── Universal Carousel Styles (timeline) ───────── */
-/* 컨테이너 */
-.carousel { position: relative; width: 100%; height: 100%; background:#fff; }
-
-/* 두 가지 트랙 구조 모두 지원 (.slides 또는 .slides-track) */
-.slides-container { width: 100%; height: 100%; overflow: hidden; }
-.slides-track, .slides {
-  height: 100%; display: flex; align-items: stretch; justify-content: flex-start;
-  transition: transform 0.3s ease;
+/* ▼▼▼ [추가된 부분] home.css와 동일한 캐러셀 스타일 ▼▼▼ */
+.media-carousel-container {
+  position: relative;
 }
-
-/* 슬라이드 */
-.carousel-slide { flex: 0 0 100%; height: 100%; }
-.carousel-slide img, .slides img { width: 100%; height: 100%; object-fit: cover; display:block; }
-
-/* 좌우 네비게이션 */
+.slides {
+  height: 100%;
+  display: flex;
+  transition: transform .32s ease;
+}
+.carousel-slide {
+  flex: 0 0 100%;
+  height: 100%;
+  position: relative;
+}
+.carousel-slide img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .cbtn {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 32px; height: 32px; border-radius: 50%; border: none;
-  background: rgba(255, 255, 255, 0.88); cursor: pointer; z-index: 10;
-  display: grid; place-items: center; opacity: 0; transition: opacity 0.2s ease; padding: 0; font-size: 1.2rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  width: 32px; height: 32px; border-radius: 50%;
+  border: none; background: rgba(255,255,255,.88);
+  display: grid; place-items: center; cursor: pointer; z-index: 2;
+  padding: 0; font-size: 1.2rem; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  opacity: 0; transition: opacity .18s ease;
 }
-.carousel:hover .cbtn { opacity: 1; }
+.media-carousel-container:hover .cbtn { opacity: 1; }
 .cbtn.prev { left: 8px; }
 .cbtn.next { right: 8px; }
-.cbtn[hidden]{ display:none !important; }
-
-/* 터치/모바일에서는 항상 표시 */
+.cbtn[hidden] { display: none !important; }
 @media (hover: none), (pointer: coarse) {
   .cbtn { opacity: 1; }
 }
-
-/* 도트 인디케이터(있을 때만) */
-.dots { position: absolute; bottom: 8px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px; z-index: 10; }
-.dots .dot { all: unset; box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.1); padding: 0; background: rgba(255, 255, 255, 0.7); cursor: pointer; }
-.dots .dot.active { background: var(--brand); border-color: transparent; }
-
-/* 이미지 없음 표시 */
-.no-image-placeholder, .noimage {
-  display: grid; place-items: center;
-  width: 100%; height: 100%;
+.noimage {
+  position: absolute; inset: 0; display: grid; place-items: center;
   color: #475569; font-weight: 800;
   background: repeating-linear-gradient(135deg, #f7faff 0 16px, #eef4ff 16px 32px);
-  letter-spacing:.06em;
+  letter-spacing: .06em;
 }
+
+/* Image Uploader (캐러셀 내부 슬라이드) */
+.image-uploader {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background-color: var(--panel-2);
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform .15s ease;
+  text-align: center;
+  height: 100%;
+}
+.image-uploader:hover { background-color: var(--chip-bg); border-color: var(--brand); }
+.uploader-slide { display:flex; align-items:center; justify-content:center; padding: 12px; background: var(--panel-2); }
+.uploader-label {
+  cursor: pointer; display:grid; place-items:center; gap:6px;
+  padding: 14px 16px; border-radius: 12px; user-select: none;
+  color: var(--brand); font-weight: 800; line-height: 1.15;
+}
+.uploader-label:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+  background: #eef4ff;
+}
+.uploader-input { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
+.up-ic{ font-size: 24px; line-height: 1; }
+.up-title{ font-size: 0.95rem; color: #0f172a; }
+.up-hint{ font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+/* ▲▲▲ [여기까지 추가] ▲▲▲ */
+
 
 /* 반응형 */
 @media (max-width: 960px) {
   .tl-content-wrapper { flex-direction: column; }
   .tl-media-content { flex-basis: auto; width: 100%; margin-top: 12px; position: static; max-width: none; grid-template-columns: 1fr 1fr; }
 }
-
-/* ───────── Image Uploader (타임라인 내 업로더) ───────── */
-.image-uploader {
-  border: 2px dashed var(--border);
-  border-radius: 12px;
-  display: flex; align-items: center; justify-content: center;
-  padding: 10px;
-  background-color: var(--panel-2);
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-.image-uploader:hover { background-color: var(--chip-bg); border-color: var(--brand); }
-.uploader-label { cursor: pointer; font-weight: 700; color: var(--brand); padding: 12px 16px; border-radius: 8px; text-align: center; }
-.uploader-input { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
-
-.image-uploader.standalone {
-  margin-top: 8px; border-style: solid; border-color: var(--border);
-}
-.carousel-slide.uploader-slide {
-  display: flex; align-items: center; justify-content: center;
-  padding: 16px; background-color: var(--panel-2);
-}
-.uploader-slide .image-uploader { width: 100%; height: 100%; margin: 0; }
-
-/* ───────── (Optional) Legacy media-carousel Block ───────── */
-.media-carousel {
-  position: relative;
-  width: 280px; max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px; overflow: hidden; background: #fff;
-}
-.media-carousel .frame { aspect-ratio: 4 / 3; display: grid; place-items: center; }
-.media-carousel img { max-width: 100%; max-height: 100%; }
-.media-carousel .noimage { height: 100%; }
 
 /* ───────── Utility States ───────── */
 .empty, .error{

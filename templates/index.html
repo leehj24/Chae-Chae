@@ -148,6 +148,7 @@
 
   
   <script>
+    // ▼▼▼ [수정된 부분] home.js와 동일한 로직으로 전체 스크립트 변경 ▼▼▼
     document.addEventListener('DOMContentLoaded', () => {
       const chatWindow = document.getElementById('chat-window');
       if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
@@ -156,22 +157,22 @@
       window.handleImgError = function(e) {
         const img = e.target;
         const slide = img.closest('.carousel-slide') || img;
-        const carousel = img.closest('.carousel');
-        const slides = carousel?.querySelector('.slides');
-        if (!carousel || !slides) return;
+        const carousel = img.closest('.media-carousel-container');
+        const slidesEl = carousel?.querySelector('.slides');
+        if (!carousel || !slidesEl) return;
 
         slide.remove();
 
-        const leftImgSlides = slides.querySelectorAll('.carousel-slide[data-type="img"]').length;
-        if (leftImgSlides === 0 && !slides.querySelector('.carousel-slide.noimage')) {
-          const noimg = document.createElement('div');
-          noimg.className = 'carousel-slide noimage';
-          noimg.innerHTML = `<div class="noimage">이미지 없음</div>`;
-          slides.insertBefore(noimg, slides.firstChild);
+        const leftImgSlides = slidesEl.querySelectorAll('.carousel-slide[data-type="img"]').length;
+        if (leftImgSlides === 0 && !slidesEl.querySelector('.noimage')) {
+          const noimgSlide = document.createElement('div');
+          noimgSlide.className = 'carousel-slide';
+          noimgSlide.innerHTML = `<div class="noimage">이미지 없음</div>`;
+          slidesEl.insertBefore(noimgSlide, slidesEl.firstChild);
         }
 
         const cur = parseInt(carousel.dataset.slide || '0', 10);
-        const total = slides.querySelectorAll('.carousel-slide').length;
+        const total = slidesEl.querySelectorAll('.carousel-slide').length;
         updateCarouselState(carousel, Math.min(cur, Math.max(0, total - 1)));
       };
 
@@ -209,54 +210,47 @@
 
         const slideParts = [];
 
-        if (!hasImages) {
-          slideParts.push(`<div class="carousel-slide noimage"><div class="noimage">이미지 없음</div></div>`);
+        if (!hasImages){
+          slideParts.push(`<div class="carousel-slide"><div class="noimage">이미지 없음</div></div>`);
         }
 
-        for (const src of list) {
+        for (const src of list){
           const proxied = src.startsWith('/uploads') ? src : `/img-proxy?u=${encodeURIComponent(src)}`;
-          slideParts.push(`
-            <div class="carousel-slide" data-type="img">
-              <img src="${proxied}" alt="${title} 이미지" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)">
-            </div>
-          `);
+          slideParts.push(`<div class="carousel-slide" data-type="img"><img src="${proxied}" alt="${title} 이미지" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`);
         }
 
-        if (canUploadMore) {
+        if (canUploadMore){
           slideParts.push(`
             <div class="carousel-slide uploader-slide" data-type="uploader">
-              <label class="image-uploader uploader-label">
-                사진 올리기 / 촬영
+              <label class="image-uploader uploader-label" tabindex="0" aria-label="사진 올리기 또는 촬영">
+                <div class="up-ic">📷</div><div class="up-title">사진 올리기 / 촬영</div><div class="up-hint">최대 1장 · 8MB</div>
                 <input type="file" class="uploader-input" accept="image/*" capture="environment" />
               </label>
-            </div>
-          `);
+            </div>`);
         }
 
         const showNav = slideParts.length > 1;
-        const nav = showNav ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
+        const nav = showNav ? `<button class="cbtn prev" type="button" aria-label="이전">‹</button><button class="cbtn next" type="button" aria-label="다음">›</button>` : '';
         
         container.dataset.slide = '0';
         container.dataset.title = title;
         container.dataset.addr1 = addr1;
         container.innerHTML = `${nav}<div class="slides">${slideParts.join('')}</div>`;
 
-        const slidesEl = container.querySelector('.slides');
-        const fileInput = slidesEl.querySelector('.uploader-input');
-        
+        const fileInput = container.querySelector('.uploader-input');
         updateCarouselState(container, 0);
 
-        async function doUpload(file) {
+        async function doUpload(file){
           if (!file) return;
           
           const tlItem = container.closest('.tl-item');
           if (tlItem.classList.contains('upload-locked')) {
-              alert('이 장소에는 이미 사진을 올리셨습니다. 새로고침 후 다시 시도해 주세요.');
-              return;
+            alert('이 장소에는 이미 사진을 올리셨어요. 새로고침 후 다시 시도해주세요.');
+            return;
           }
 
-          try {
-            const upSlide = slidesEl.querySelector('.uploader-slide');
+          try{
+            const upSlide = container.querySelector('.uploader-slide');
             if (upSlide) upSlide.innerHTML = '<div class="image-uploader">업로드 중…</div>';
 
             const fd = new FormData();
@@ -264,43 +258,44 @@
             fd.append('title', title);
             fd.append('addr1', addr1);
 
-            const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
+            const res = await fetch('/api/upload-image', { method:'POST', body: fd });
             const json = await res.json();
             if (!json.ok) throw new Error(json.error || '업로드 실패');
 
             tlItem.classList.add('upload-locked');
+            setupCarousel(container, json.images, title, addr1);
             
-            setupCarousel(container, json.images || [], title, addr1);
-            
-            const newImageIndex = (json.images || []).length - 1;
-            updateCarouselState(container, newImageIndex);
+            const newImageIndex = json.images.length - (json.images.length < 4 ? 1 : 0);
+            updateCarouselState(container, Math.max(0, newImageIndex - 1));
 
-          } catch (err) {
+          } catch(err) {
             alert(err.message || '업로드 중 오류가 발생했습니다.');
             setupCarousel(container, images, title, addr1);
           }
         }
 
-        if (fileInput) {
-          fileInput.addEventListener('change', (e) => doUpload(e.target.files?.[0]));
-        }
-
-        if (showNav) {
-          container.addEventListener('click', (e) => {
+        if (fileInput) fileInput.addEventListener('change', (e)=> doUpload(e.target.files?.[0]));
+        
+        if (!container.dataset.listenerAttached) {
+          container.dataset.listenerAttached = 'true';
+          container.addEventListener('click', (e)=>{
             const prev = e.target.closest('.cbtn.prev');
             const next = e.target.closest('.cbtn.next');
             if (!prev && !next) return;
-
+            
+            const slidesEl = container.querySelector('.slides');
+            if (!slidesEl) return;
+            
             const slides = Array.from(slidesEl.querySelectorAll('.carousel-slide'));
             const cur = parseInt(container.dataset.slide || '0', 10);
             const lastIdx = slides.length - 1;
-
-            if (prev) {
+            
+            if (prev){ 
               updateCarouselState(container, cur - 1);
             }
-            if (next) {
+            if (next){ 
               const nextIdx = Math.min(cur + 1, lastIdx);
-              updateCarouselState(container, nextIdx);
+              updateCarouselState(container, nextIdx); 
             }
           });
         }

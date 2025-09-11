@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.secret_key = "dev-secret-key"
 
-# ... (이전과 동일한 모든 설정 및 함수 코드) ...
+# ... (기존 설정 코드는 변경 없음) ...
 UPLOAD_FOLDER = str(BASE_DIR / "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
@@ -247,7 +247,6 @@ def home():
 def index():
     _init_session_if_needed()
     return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
-# ... (chat, do_generate 등 나머지 라우트 함수는 변경 없음) ...
 @app.post("/chat")
 def chat():
     _init_session_if_needed(); state = session.get("state"); messages = session.get("messages", [])
@@ -333,7 +332,10 @@ def api_places():
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                all_images = _get_all_images_for_place(title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
+                # ▼▼▼ [수정] home.html에서도 사용자 업로드 이미지를 포함하여 보여주도록 변경 ▼▼▼
+                all_images = _get_all_images_for_place(
+                    title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
+                )
                 items_list.append({"rank": int(r.get("rank", 0)), "title": title, "addr1": addr1, "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")), "images": all_images, "tour_score":   r.get("tour_score") if pd.notna(r.get("tour_score")) else None, "review_score": r.get("review_score") if pd.notna(r.get("review_score")) else None,})
             return items_list
         return _json({"ok": True, "sort_label": score_label, "sort_col": score_col, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages, "items": process_view_to_items(view),})
