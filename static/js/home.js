@@ -35,6 +35,11 @@
   const submitRatingBtn = $('#submitRatingBtn');
   let currentRatingTarget = null;
 
+  // 후기 모달 요소 가져오기
+  const reviewModal = $('#reviewModal');
+  const reviewModalPlaceTitle = $('#reviewModalPlaceTitle');
+  const reviewIframe = $('#reviewIframe');
+
   // ─────────────────────────────────────────────
   // 캐러셀 유틸 (홈 카드 전용)
   // ─────────────────────────────────────────────
@@ -413,7 +418,20 @@
         setStarsInModal(0);
       };
 
+      const openReviewModal = (title, url) => {
+        reviewModalPlaceTitle.textContent = title;
+        reviewIframe.src = url;
+        reviewModal.classList.add('visible');
+      }
+
+      const closeReviewModal = () => {
+        reviewModal.classList.remove('visible');
+        reviewIframe.src = 'about:blank';
+      }
+
       ratingModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeRatingModal));
+
+      reviewModal?.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeReviewModal));
 
       submitRatingBtn.addEventListener('click', async () => {
         if (!currentRatingTarget) return;
@@ -446,7 +464,7 @@
         if (e.target.closest('.review-btn')) {
           const details = await fetchPlaceDetails(card);
           if (details.kakao_url) {
-            window.open(details.kakao_url, '_blank');
+            openReviewModal(card.dataset.title, details.kakao_url);
           } else {
             if (confirm('이 장소에 대한 후기 정보가 아직 없습니다. 별점을 남기시겠어요?')) {
               openRatingModal(card);

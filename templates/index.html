@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=10" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=11" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -176,6 +176,21 @@
         <button type="button" class="modal-btn modal-close-btn">취소</button>
         <button type="button" id="submitRatingBtn" class="modal-btn primary" disabled>저장</button>
       </footer>
+    </div>
+  </div>
+
+  <div id="reviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
+    <div class="modal-content wide">
+      <header class="modal-header">
+        <div>
+          <h3 id="reviewModalTitle">장소 후기</h3>
+          <span id="reviewModalPlaceTitle" class="modal-title-place"></span>
+        </div>
+        <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+      </header>
+      <div class="modal-body">
+        <iframe id="reviewIframe" src="about:blank" frameborder="0"></iframe>
+      </div>
     </div>
   </div>
 
@@ -403,6 +418,12 @@
       const ratingFormStars = ratingModal.querySelector('.stars');
       const submitRatingBtn = document.getElementById('submitRatingBtn');
       let currentRatingTarget = null;
+      
+      // [추가] 후기 모달 요소 가져오기
+      const reviewModal = document.getElementById('reviewModal');
+      const reviewModalPlaceTitle = document.getElementById('reviewModalPlaceTitle');
+      const reviewIframe = document.getElementById('reviewIframe');
+
 
       function updateStarRatingUI(starDisplayElement, avgRating, totalRatings) {
         const avg = avgRating || 0;
@@ -465,8 +486,25 @@
         setStarsInModal(0);
       }
       
+      // [추가] 후기 모달 열기/닫기 함수
+      function openReviewModal(title, url) {
+        reviewModalPlaceTitle.textContent = title;
+        reviewIframe.src = url;
+        reviewModal.classList.add('visible');
+      }
+
+      function closeReviewModal() {
+        reviewModal.classList.remove('visible');
+        reviewIframe.src = 'about:blank'; // Iframe 내용 초기화
+      }
+
       ratingModal.querySelectorAll('.modal-close-btn').forEach(btn => {
         btn.addEventListener('click', closeRatingModal);
+      });
+
+      // [추가] 후기 모달 닫기 버튼에 이벤트 리스너 추가
+      reviewModal.querySelectorAll('.modal-close-btn').forEach(btn => {
+        btn.addEventListener('click', closeReviewModal);
       });
 
       submitRatingBtn.addEventListener('click', async () => {
@@ -533,9 +571,10 @@
         if (starDisplay) {
           openRatingModal(targetCard);
         } else if (reviewBtn) {
+          // [수정] 새 창 대신 모달을 열도록 변경
           const details = await fetchPlaceDetails(targetCard);
           if (details.kakao_url) {
-            window.open(details.kakao_url, '_blank');
+            openReviewModal(targetCard.dataset.title, details.kakao_url);
           } else {
             if (confirm('이 장소에 대한 후기 정보가 아직 없습니다. 별점을 남기시겠어요?')) {
               openRatingModal(targetCard);
