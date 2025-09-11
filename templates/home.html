@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채 – 여행 추천 챗봇</title>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}?v=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}?v=3" />
 </head>
 <body>
   <header class="topbar">
@@ -210,21 +210,61 @@
 
   <div id="reviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
     <div class="modal-content wide">
-      <header class="modal-header">
-        <div>
-          <h3 id="reviewModalTitle">장소 후기</h3>
-          <span id="reviewModalPlaceTitle" class="modal-title-place"></span>
+        <header class="modal-header">
+            <div>
+                <h3 id="reviewModalTitle">장소 후기</h3>
+                <span id="reviewModalPlaceTitle" class="modal-title-place"></span>
+            </div>
+            <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+        </header>
+        
+        <div class="review-content-container">
+            <div id="reviewIframeContainer" class="review-container hidden">
+                <iframe id="reviewIframe" src="about:blank" frameborder="0"></iframe>
+            </div>
+
+            <div id="customReviewContainer" class="review-container hidden">
+                <div class="review-modal-toolbar">
+                    <div class="sort-dropdown" id="reviewSortDropdown" data-current="newest">
+                        <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="label">최신순</span>
+                            <span class="chev" aria-hidden="true">▾</span>
+                        </button>
+                        <ul class="sort-menu" role="listbox">
+                            <li role="option" data-value="newest" aria-selected="true">최신순</li>
+                            <li role="option" data-value="oldest">오래된순</li>
+                        </ul>
+                    </div>
+                    <button type="button" id="openWriteReviewBtn" class="primary-btn small">후기 작성</button>
+                </div>
+                <div id="reviewList" class="review-modal-body">
+                </div>
+            </div>
         </div>
-        <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
-      </header>
-      <div class="modal-body">
-        <iframe id="reviewIframe" src="about:blank" frameborder="0"></iframe>
-      </div>
+    </div>
+  </div>
+
+  <div id="writeReviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="writeReviewModalTitle">
+    <div class="modal-content">
+        <header class="modal-header">
+            <div>
+                <h3 id="writeReviewModalTitle">후기 작성</h3>
+                <span id="writeReviewModalPlaceTitle" class="modal-title-place"></span>
+            </div>
+            <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+        </header>
+        <div class="modal-body">
+            <textarea id="reviewTextarea" class="review-textarea" placeholder="이 장소에 대한 경험을 공유해주세요. (10자 이상)" maxlength="500"></textarea>
+        </div>
+        <footer class="modal-actions">
+            <button type="button" class="modal-btn modal-close-btn">취소</button>
+            <button type="button" id="submitReviewBtn" class="modal-btn primary" disabled>완료</button>
+        </footer>
     </div>
   </div>
 
 
-  <script src="{{ url_for('static', filename='js/home.js') }}?v=8"></script>
+  <script src="{{ url_for('static', filename='js/home.js') }}?v=10"></script>
 
   <noscript>
     <div style="max-width:1100px;margin:24px auto;padding:12px;border:1px solid #ccc;border-radius:12px">

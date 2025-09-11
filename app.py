@@ -1,6 +1,7 @@
+# app.py
 
 import json, time, traceback, re, os, threading, math, uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -17,7 +18,6 @@ import recommend.run_walk as run_walk_module
 import recommend.run_transit as run_transit_module
 from filter.utils import get_filter_options
 
-# cache_builder.py 파일에서 함수를 가져옵니다.
 from filter.cache_builder import update_cache_if_needed
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -59,11 +59,9 @@ sido_map = {
 }
 MAX_MSGS = 30
 
-# ▼▼▼ [추가된 부분] 후기/별점 데이터 파일 경로 및 잠금 객체 ▼▼▼
 PATH_USER_REVIEWS = str(BASE_DIR / "_user_reviews.json")
 _USER_REVIEWS_CACHE = {"data": None, "mtime": None}
 _USER_REVIEWS_LOCK = threading.Lock()
-# ▲▲▲ [추가된 부분] ▲▲▲
 
 def _trim_msgs():
     session["messages"] = session.get("messages", [])[-MAX_MSGS:]
@@ -81,10 +79,8 @@ def _nfc(s: str) -> str:
 def _init_session_if_needed():
     if "state" not in session: session["state"] = "지역"
     if "messages" not in session or not session["messages"]: session["messages"] = [{"sender": "bot", "html": BOT_PROMPTS["지역"]}]
-    # ▼▼▼ [추가된 부분] 세션 ID가 없으면 생성 ▼▼▼
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
-    # ▲▲▲ [추가된 부분] ▲▲▲
 
 _PLACES_CACHE = {"df": None, "mtime": None, "path": None}
 def _read_csv_robust(path: str) -> pd.DataFrame:
@@ -110,7 +106,6 @@ def _load_places_df() -> pd.DataFrame:
     
     df = _read_csv_robust(path).copy()
     
-    # ▼▼▼ [수정된 부분] mapx, mapy 컬럼도 필수로 포함하여 로드 ▼▼▼
     req = {
         "title": _pick_column(df, "title", "명칭", "place", "name"),
         "addr1": _pick_column(df, "addr1", "주소"),
@@ -120,7 +115,6 @@ def _load_places_df() -> pd.DataFrame:
         "mapx": _pick_column(df, "mapx", "x", "lon", "longitude"),
         "mapy": _pick_column(df, "mapy", "y", "lat", "latitude"),
     }
-    # ▲▲▲ [수정된 부분] ▲▲▲
 
     if miss := [k for k, v in req.items() if v is None]: raise KeyError(f"Missing required CSV columns: {miss} / Found: {list(df.columns)}")
     opt = {"cat3": _pick_column(df, "cat3", "소분류", "category3"),"firstimage": _pick_column(df, "firstimage", "image", "img1", "thumbnail"),}
@@ -130,7 +124,7 @@ def _load_places_df() -> pd.DataFrame:
     df = df.rename(columns=rename_map)
     for c in ("cat3", "firstimage"):
         if c not in df.columns: df[c] = ""
-    for c in ("tour_score", "review_score", "mapx", "mapy"): # mapx, mapy 추가
+    for c in ("tour_score", "review_score", "mapx", "mapy"):
         if c not in df.columns: df[c] = 0
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     for c in ("title", "addr1", "cat1", "cat3", "firstimage"):
@@ -148,7 +142,6 @@ _USER_UPLOADS_LOCK = threading.Lock()
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# ▼▼▼ [추가된 부분] 후기/별점 데이터 로드 및 저장 함수 ▼▼▼
 def _load_user_reviews():
     with _USER_REVIEWS_LOCK:
         p = Path(PATH_USER_REVIEWS)
@@ -173,7 +166,6 @@ def _save_user_reviews(data):
             _USER_REVIEWS_CACHE["mtime"] = None
         except Exception as e:
             print(f"❌ 에러: 사용자 후기 파일 저장 실패 - {e}")
-# ▲▲▲ [추가된 부분] ▲▲▲
 
 def _load_user_uploads():
     with _USER_UPLOADS_LOCK:
@@ -282,7 +274,6 @@ def _nearest_bus(lat, lon) -> str:
     except Exception: pass
     return ""
 
-# ▼▼▼ [추가된 부분] 카카오맵 장소 URL을 찾는 함수 ▼▼▼
 def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
     if not KAKAO_API_KEY: return None
     _ensure_session()
@@ -295,17 +286,14 @@ def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
         docs = res.json().get("documents", [])
         if not docs: return None
         
-        # 이름이 가장 유사한 장소를 우선 선택
         clean_title = title.replace('_', ' ')
         for place in docs:
             if clean_title in place.get("place_name", ""):
                 return place.get("place_url")
         
-        # 유사한 이름이 없으면 첫 번째 결과를 반환
         return docs[0].get("place_url")
     except requests.exceptions.RequestException:
         return None
-# ▲▲▲ [추가된 부분] ▲▲▲
 
 def start_self_pinging():
     def self_ping_task():
@@ -415,7 +403,6 @@ def api_places():
                 all_images = _get_all_images_for_place(
                     title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
                 )
-                # ▼▼▼ [수정] mapx, mapy도 반환값에 포함 ▼▼▼
                 items_list.append({
                     "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
                     "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")),
@@ -425,7 +412,6 @@ def api_places():
                     "mapx": r.get("mapx") if pd.notna(r.get("mapx")) else None,
                     "mapy": r.get("mapy") if pd.notna(r.get("mapy")) else None,
                 })
-                # ▲▲▲ [수정] ▲▲▲
             return items_list
         return _json({"ok": True, "sort_label": score_label, "sort_col": score_col, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages, "items": process_view_to_items(view),})
     except Exception as e: print("❌ API Error in /api/places:"); traceback.print_exc(); return _json({"ok": False, "error": str(e)}, 500)
@@ -437,7 +423,7 @@ def api_place_media():
     if coords: payload["coords"] = {"y": coords[0], "x": coords[1]}
     return _json(payload)
 
-# ▼▼▼ [추가된 부분] 장소 상세 정보(후기, 별점, 카카오 URL) API ▼▼▼
+# [수정] 텍스트 후기 관련 로직 추가
 @app.get("/api/place-details")
 def api_place_details():
     _init_session_if_needed()
@@ -449,15 +435,14 @@ def api_place_details():
     if not title or not addr1:
         return _json({"ok": False, "error": "title, addr1이 필요합니다."}, 400)
 
-    # 1. 카카오맵 장소 URL 가져오기
     kakao_url = _get_kakao_place_url(title, mapx, mapy)
 
-    # 2. 후기 및 별점 정보 처리
     key = f"{title}|{addr1}"
     reviews_db = _load_user_reviews()
     place_reviews = reviews_db.get(key, {})
     
     ratings = place_reviews.get("ratings", {})
+    reviews = place_reviews.get("reviews", {}) # 텍스트 후기
     
     avg_rating = 0
     total_ratings = 0
@@ -466,9 +451,8 @@ def api_place_details():
         avg_rating = sum(ratings.values()) / total_ratings if total_ratings > 0 else 0
 
     my_rating = ratings.get(session.get('user_id'))
-    
-    # reviews = place_reviews.get("reviews", {})
-    # my_review = reviews.get(session.get('user_id'))
+    my_review_data = next((r for r in reviews.values() if r.get('user_id') == session.get('user_id')), None)
+    my_review_text = my_review_data.get('text') if my_review_data else None
 
     return _json({
         "ok": True,
@@ -476,8 +460,28 @@ def api_place_details():
         "avg_rating": avg_rating,
         "total_ratings": total_ratings,
         "my_rating": my_rating,
+        "my_review_text": my_review_text,
     })
 
+# [신규] 텍스트 후기 목록을 가져오는 API
+@app.get("/api/get-reviews")
+def get_reviews():
+    title = _nfc(request.args.get("title", ""))
+    addr1 = _nfc(request.args.get("addr1", ""))
+    if not title or not addr1:
+        return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
+
+    key = f"{title}|{addr1}"
+    reviews_db = _load_user_reviews()
+    place_reviews_data = reviews_db.get(key, {}).get("reviews", {})
+    
+    # 딕셔너리의 값들을 리스트로 변환하여 반환
+    reviews_list = list(place_reviews_data.values())
+    
+    return _json({"ok": True, "reviews": reviews_list})
+
+
+# [수정] 텍스트 후기 저장을 포함하도록 수정
 @app.post("/api/submit-review")
 def api_submit_review():
     _init_session_if_needed()
@@ -485,29 +489,43 @@ def api_submit_review():
     title = _nfc(data.get("title", ""))
     addr1 = _nfc(data.get("addr1", ""))
     rating = data.get("rating")
+    review_text = data.get("review_text", "").strip() # 후기 텍스트 받기
 
-    if not title or not addr1 or rating is None:
+    if not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
     
-    try:
-        rating_val = int(rating)
-        if not (1 <= rating_val <= 5):
-            raise ValueError()
-    except (ValueError, TypeError):
-        return _json({"ok": False, "error": "별점은 1-5 사이의 정수여야 합니다."}, 400)
-
     key = f"{title}|{addr1}"
     user_id = session.get('user_id')
-
     reviews_db = _load_user_reviews()
+    
     if key not in reviews_db:
         reviews_db[key] = {"ratings": {}, "reviews": {}}
-    
-    reviews_db[key]["ratings"][user_id] = rating_val
-    _save_user_reviews(reviews_db)
 
-    return _json({"ok": True, "message": "별점이 저장되었습니다."})
-# ▲▲▲ [추가된 부분] ▲▲▲
+    # 별점 저장 로직
+    if rating is not None:
+        try:
+            rating_val = int(rating)
+            if not (1 <= rating_val <= 5): raise ValueError()
+            reviews_db[key].setdefault("ratings", {})[user_id] = rating_val
+        except (ValueError, TypeError):
+            return _json({"ok": False, "error": "별점은 1-5 사이의 정수여야 합니다."}, 400)
+
+    # 텍스트 후기 저장/수정/삭제 로직
+    if review_text:
+        # 기존에 작성한 후기가 있는지 확인
+        existing_review_id = next((rid for rid, r in reviews_db[key].get("reviews", {}).items() if r.get('user_id') == user_id), None)
+        
+        review_data = {
+            "user_id": user_id,
+            "text": review_text,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        review_id = existing_review_id or str(uuid.uuid4())
+        reviews_db[key].setdefault("reviews", {})[review_id] = review_data
+    
+    _save_user_reviews(reviews_db)
+    return _json({"ok": True, "message": "후기가 저장되었습니다."})
 
 @app.get("/api/geocode")
 def api_geocode():

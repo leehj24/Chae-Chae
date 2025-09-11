@@ -29,21 +29,32 @@
   const orderTrigger  = orderDropdown?.querySelector('.sort-trigger');
   const orderMenu     = orderDropdown?.querySelector('.sort-menu');
 
+  // --- 모달 관련 변수 통합 선언 ---
   const ratingModal = $('#ratingModal');
   const modalPlaceTitle = $('#modalPlaceTitle');
   const ratingFormStars = ratingModal?.querySelector('.stars');
-  const submitRatingBtn = $('#submitRatingBtn');
-  let currentRatingTarget = null;
+  
+  const reviewModal = document.getElementById('reviewModal');
+  const reviewModalPlaceTitle = document.getElementById('reviewModalPlaceTitle');
+  
+  const reviewIframeContainer = document.getElementById('reviewIframeContainer');
+  const reviewIframe = document.getElementById('reviewIframe');
+  const customReviewContainer = document.getElementById('customReviewContainer');
+  const reviewList = document.getElementById('reviewList');
+  const openWriteReviewBtn = document.getElementById('openWriteReviewBtn');
+  
+  const writeReviewModal = document.getElementById('writeReviewModal');
+  const writeReviewModalPlaceTitle = document.getElementById('writeReviewModalPlaceTitle');
+  const reviewTextarea = document.getElementById('reviewTextarea');
+  const submitReviewTextBtn = writeReviewModal.querySelector('#submitReviewBtn');
+  
+  const reviewSortDropdown = document.getElementById('reviewSortDropdown');
+  
+  let currentReviewTarget = null;
+  let currentReviews = [];
 
-  // 후기 모달 요소 가져오기
-  const reviewModal = $('#reviewModal');
-  const reviewModalPlaceTitle = $('#reviewModalPlaceTitle');
-  const reviewIframe = $('#reviewIframe');
 
-  // ─────────────────────────────────────────────
-  // 캐러셀 유틸 (홈 카드 전용)
-  // ─────────────────────────────────────────────
-
+  // 캐러셀 유틸
   window.handleHomeCardImgError = function(e){
     const img = e.target;
     const slide = img.closest('.carousel-slide') || img;
@@ -174,7 +185,6 @@
     }
   }
 
-  // 별점 UI 업데이트 함수
   function updateStarRatingUI(starDisplayElement, avgRating, totalRatings) {
     const avg = avgRating || 0;
     const total = totalRatings || 0;
@@ -187,7 +197,6 @@
     if (countEl) countEl.textContent = total;
   }
 
-  // 장소 상세 정보(별점, 카카오URL 등) 가져오기
   async function fetchPlaceDetails(cardElement, forceRefresh = false) {
       if (cardElement.dataset.detailsLoaded && !forceRefresh) {
           return JSON.parse(cardElement.dataset.detailsLoaded);
@@ -214,10 +223,9 @@
           console.error('장소 상세 정보 로드 실패:', title, e);
           const starDisplay = cardElement.querySelector('.star-rating-display');
           if (starDisplay) updateStarRatingUI(starDisplay, 0, 0);
-          return { kakao_url: null, avg_rating: 0, total_ratings: 0, my_rating: 0 };
+          return { kakao_url: null, avg_rating: 0, total_ratings: 0, my_rating: 0, my_review_text: null };
       }
   }
-
 
   function cardHTML(item){
     const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy } = item;
@@ -252,7 +260,7 @@
                 <span class="rating-avg">…</span> (<span class="rating-count">…</span>)
               </span>
             </div>
-            <button type="button" class="review-btn">후기 보기</button>
+            <button type="button" class="review-btn">후기 보기/작성</button>
           </div>
         </div>
       </article>
@@ -375,7 +383,10 @@
     });
   }
   
-  if (ratingModal) {
+  // --- 모든 모달 로직 통합 관리 ---
+  if (ratingModal && reviewModal && writeReviewModal) {
+      const submitRatingBtn = ratingModal.querySelector('#submitRatingBtn');
+
       const setStarsInModal = (rating) => {
         const stars = ratingFormStars.querySelectorAll('.star');
         stars.forEach(star => {
@@ -406,7 +417,7 @@
       });
 
       const openRatingModal = (targetCard) => {
-        currentRatingTarget = targetCard;
+        currentReviewTarget = targetCard;
         modalPlaceTitle.textContent = targetCard.dataset.title;
         fetchPlaceDetails(targetCard).then(data => setStarsInModal(data.my_rating || 0));
         ratingModal.classList.add('visible');
@@ -414,40 +425,159 @@
 
       const closeRatingModal = () => {
         ratingModal.classList.remove('visible');
-        currentRatingTarget = null;
+        currentReviewTarget = null;
         setStarsInModal(0);
       };
 
-      const openReviewModal = (title, url) => {
-        reviewModalPlaceTitle.textContent = title;
-        reviewIframe.src = url;
-        reviewModal.classList.add('visible');
+      function openReviewModal(targetCard, kakaoUrl) {
+          currentReviewTarget = targetCard;
+          reviewModalPlaceTitle.textContent = targetCard.dataset.title;
+
+          if (kakaoUrl) {
+              reviewIframe.src = kakaoUrl;
+              reviewIframeContainer.classList.remove('hidden');
+              customReviewContainer.classList.add('hidden');
+          } else {
+              reviewIframeContainer.classList.add('hidden');
+              customReviewContainer.classList.remove('hidden');
+              fetchAndRenderReviews();
+          }
+          reviewModal.classList.add('visible');
       }
 
-      const closeReviewModal = () => {
-        reviewModal.classList.remove('visible');
-        reviewIframe.src = 'about:blank';
+      function closeReviewModal() {
+          reviewModal.classList.remove('visible');
+          reviewIframe.src = 'about:blank';
+          currentReviewTarget = null;
+          reviewList.innerHTML = '';
       }
 
+      async function fetchAndRenderReviews() {
+          if (!currentReviewTarget) return;
+          const { title, addr1 } = currentReviewTarget.dataset;
+          reviewList.innerHTML = '<div class="media-loading"><div class="spinner small"></div></div>';
+          try {
+              const res = await fetch(`/api/get-reviews?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr1)}`);
+              const json = await res.json();
+              if (!json.ok) throw new Error('후기 로드 실패');
+              currentReviews = json.reviews || [];
+              renderReviewList();
+          } catch (e) {
+              reviewList.innerHTML = '<div class="review-empty">후기를 불러오는데 실패했습니다.</div>';
+          }
+      }
+
+      function renderReviewList() {
+          const sortOrder = reviewSortDropdown.dataset.current || 'newest';
+          
+          if (currentReviews.length === 0) {
+              reviewList.innerHTML = '<div class="review-empty">아직 작성된 후기가 없어요. 첫 후기를 남겨주세요!</div>';
+              return;
+          }
+
+          const sortedReviews = [...currentReviews].sort((a, b) => {
+              const dateA = new Date(a.timestamp);
+              const dateB = new Date(b.timestamp);
+              return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+          });
+
+          reviewList.innerHTML = sortedReviews.map(review => {
+              const date = new Date(review.timestamp);
+              const formattedDate = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+              return `
+                  <div class="review-card">
+                      <p class="review-card-text">${review.text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '<br>')}</p>
+                      <div class="review-card-footer">
+                          <span class="review-card-date">${formattedDate}</span>
+                      </div>
+                  </div>
+              `;
+          }).join('');
+      }
+
+      function openWriteReviewModal() {
+          if (!currentReviewTarget) return;
+          writeReviewModalPlaceTitle.textContent = currentReviewTarget.dataset.title;
+          fetchPlaceDetails(currentReviewTarget, true).then(data => {
+              reviewTextarea.value = data.my_review_text || '';
+              submitReviewTextBtn.disabled = (reviewTextarea.value.trim().length < 10);
+          });
+          writeReviewModal.classList.add('visible');
+      }
+
+      function closeWriteReviewModal() {
+          writeReviewModal.classList.remove('visible');
+      }
+      
       ratingModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeRatingModal));
+      reviewModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeReviewModal));
+      writeReviewModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeWriteReviewModal));
 
-      reviewModal?.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeReviewModal));
+      openWriteReviewBtn.addEventListener('click', openWriteReviewModal);
+
+      reviewTextarea.addEventListener('input', () => {
+          submitReviewTextBtn.disabled = (reviewTextarea.value.trim().length < 10);
+      });
+
+      submitReviewTextBtn.addEventListener('click', async () => {
+          if (!currentReviewTarget) return;
+          const { title, addr1 } = currentReviewTarget.dataset;
+          const review_text = reviewTextarea.value.trim();
+          submitReviewTextBtn.disabled = true;
+
+          try {
+              const res = await fetch('/api/submit-review', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ title, addr1, review_text }),
+              });
+              const json = await res.json();
+              if (!json.ok) throw new Error(json.error || '저장 실패');
+              closeWriteReviewModal();
+              fetchAndRenderReviews();
+          } catch (err) {
+              alert(err.message || '후기 저장 중 오류 발생');
+          } finally {
+              submitReviewTextBtn.disabled = false;
+          }
+      });
+      
+      const reviewSortTrigger = reviewSortDropdown.querySelector('.sort-trigger');
+      const reviewSortMenu = reviewSortDropdown.querySelector('.sort-menu');
+      if(reviewSortTrigger && reviewSortMenu) {
+        reviewSortTrigger.addEventListener('click', () => reviewSortDropdown.classList.toggle('open'));
+        reviewSortMenu.querySelectorAll('[role="option"]').forEach(opt => {
+            opt.addEventListener('click', () => {
+                reviewSortMenu.querySelector('[aria-selected="true"]').setAttribute('aria-selected', 'false');
+                opt.setAttribute('aria-selected', 'true');
+                reviewSortDropdown.dataset.current = opt.dataset.value;
+                reviewSortTrigger.querySelector('.label').textContent = opt.textContent;
+                reviewSortDropdown.classList.remove('open');
+                renderReviewList();
+            });
+        });
+        document.addEventListener('click', e => {
+            if (!reviewSortDropdown.contains(e.target)) {
+                reviewSortDropdown.classList.remove('open');
+            }
+        });
+      }
 
       submitRatingBtn.addEventListener('click', async () => {
-        if (!currentRatingTarget) return;
-        const { title, addr1, mapx, mapy } = currentRatingTarget.dataset;
+        if (!currentReviewTarget) return;
+        const { title, addr1 } = currentReviewTarget.dataset;
         const rating = ratingFormStars.dataset.rating;
 
         try {
           const res = await fetch('/api/submit-review', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ title, addr1, rating, mapx, mapy }),
+            body: JSON.stringify({ title, addr1, rating }),
           });
           const json = await res.json();
           if (!json.ok) throw new Error(json.error || '저장 실패');
           
-          fetchPlaceDetails(currentRatingTarget, true);
+          fetchPlaceDetails(currentReviewTarget, true);
           closeRatingModal();
         } catch (err) {
           alert(err.message || '저장 중 오류 발생');
@@ -463,13 +593,7 @@
         }
         if (e.target.closest('.review-btn')) {
           const details = await fetchPlaceDetails(card);
-          if (details.kakao_url) {
-            openReviewModal(card.dataset.title, details.kakao_url);
-          } else {
-            if (confirm('이 장소에 대한 후기 정보가 아직 없습니다. 별점을 남기시겠어요?')) {
-              openRatingModal(card);
-            }
-          }
+          openReviewModal(card, details.kakao_url);
         }
       });
   }
