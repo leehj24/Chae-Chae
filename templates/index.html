@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=8" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9" />
 </head>
 <body>
   {% set state = session.get('state', '지역') %}
@@ -147,262 +147,193 @@
   {% endif %}
 
   <script>
+    // ─────────────────────────────────────────────
+    // 결과 카드(타임라인) 이미지/지도 로딩 및 캐러셀
+    // 요구사항:
+    //  - 이미지 없으면 '이미지 없음'
+    //  - 여러 장이면 ‹ › 로 넘김, 첫 장엔 ‹ 숨김, 마지막 장엔 › 숨김
+    //  - 이미지 소스 우선순위는 서버(/api/place-media)에서 보장
+    // ─────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       const chatWindow = document.getElementById('chat-window');
       if (chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
       window.resultsRendererInitialized = true;
-      const DATA_CACHE = new Map();
 
-      const formatStation = (line, station) => {
-          if (!station) return '';
-          if (line && station.includes(line)) return station;
-          return line ? `${line} ${station}`.trim() : station;
-      };
-
+      // 이미지 로딩 실패 시 슬라이드 제거
       window.handleImgError = function(e) {
         const img = e.target;
-        const slide = img.closest('.carousel-slide');
         const carousel = img.closest('.carousel');
-        if (!carousel || !slide) return;
-        
-        const title = carousel.closest('.tl-item.visit')?.dataset.title || '';
-        const addr = carousel.closest('.tl-item.visit')?.dataset.addr1 || '';
-        const key = `${title}|${addr}`;
-        
-        // Remove from cache and re-render
-        if(DATA_CACHE.has(key)) {
-            const data = DATA_CACHE.get(key);
-            data.images = data.images.filter(url => !img.src.includes(encodeURIComponent(url)));
-            setupCarousel(carousel.parentElement, data.images, title, addr);
-        } else {
-            slide.remove();
-            const slides = carousel.querySelectorAll('.carousel-slide');
-            carousel.dataset.count = slides.length;
-            updateCarouselState(carousel, 0);
+        const slides = carousel?.querySelector('.slides');
+        if (!slides) return;
+
+        img.remove();
+        const left = slides.querySelectorAll('img').length;
+        if (left === 0) {
+          carousel.innerHTML = `<div class="noimage">이미지 없음</div>`;
+          return;
         }
+        carousel.dataset.count = String(left);
+        const cur = parseInt(carousel.dataset.slide || '0', 10);
+        updateCarouselState(carousel, Math.min(cur, left - 1));
       };
-      
-      async function fetchPlaceData(title, addr) {
-        const key = `${title}|${addr}`;
-        if (DATA_CACHE.has(key)) return DATA_CACHE.get(key);
+
+      async function fetchPlaceMedia(title, addr) {
         try {
-          const [imgRes, geoRes] = await Promise.all([
-            fetch(`/api/places?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr)}`),
-            fetch(`/api/geocode?title=${encodeURIComponent(title)}&addr=${encodeURIComponent(addr)}`)
-          ]);
-          const imgData = await imgRes.json(), geoData = await geoRes.json();
-          const images = (imgData.ok && imgData.items[0]) ? imgData.items[0].images : [];
-          const coords = geoData.ok ? geoData.result : null;
-          const result = { images, coords };
-          DATA_CACHE.set(key, result);
-          return result;
-        } catch (error) { return { images: [], coords: null }; }
+          const res = await fetch(`/api/place-media?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr)}`);
+          const data = await res.json();
+          if (!data.ok) return { images: [], coords: null };
+          return { images: data.images || [], coords: data.coords || null };
+        } catch {
+          return { images: [], coords: null };
+        }
       }
 
       function updateCarouselState(carousel, newIndex) {
-          const track = carousel.querySelector('.slides-track');
-          const dots = carousel.querySelectorAll('.dots .dot');
-          const prevBtn = carousel.querySelector('.cbtn.prev');
-          const nextBtn = carousel.querySelector('.cbtn.next');
-          
-          const totalCount = parseInt(carousel.dataset.count, 10);
-          const imageCount = parseInt(carousel.dataset.imageCount, 10);
-          if (totalCount === 0 || !track) return;
+        const slidesEl = carousel.querySelector('.slides');
+        const imgs = slidesEl ? Array.from(slidesEl.querySelectorAll('img')) : [];
+        const n = imgs.length;
+        if (!slidesEl || n === 0) return;
 
-          const index = Math.max(0, Math.min(newIndex, totalCount - 1));
-          carousel.dataset.slide = index;
-          track.style.transform = `translateX(-${index * 100}%)`;
-          
-          dots.forEach((dot, i) => dot.classList.toggle('active', i === index && index < imageCount));
-          
-          if (prevBtn) prevBtn.hidden = (index <= 0);
-          if (nextBtn) nextBtn.hidden = (index >= totalCount - 1);
+        const i = Math.max(0, Math.min(newIndex, n - 1));
+        carousel.dataset.slide = String(i);
+        slidesEl.style.transform = `translateX(-${i * 100}%)`;
+
+        const prevBtn = carousel.querySelector('.cbtn.prev');
+        const nextBtn = carousel.querySelector('.cbtn.next');
+        if (prevBtn) prevBtn.hidden = (i <= 0);
+        if (nextBtn) nextBtn.hidden = (i >= n - 1);
       }
 
-      async function handleImageUpload(file, title, addr, container) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('title', title);
-        formData.append('addr1', addr);
+      function setupCarousel(container, images, title) {
+        const list = (images || []).filter(Boolean);
+        if (list.length === 0) {
+          container.innerHTML = `<div class="noimage">이미지 없음</div>`;
+          return;
+        }
 
-        const uploader = container.querySelector('.image-uploader');
-        if (uploader) uploader.innerHTML = '<div class="media-loading"><div class="spinner small"></div></div>';
+        const slides = list.map(src => {
+          const proxied = src.startsWith('/uploads') ? src : `/img-proxy?u=${encodeURIComponent(src)}`;
+          return `<img src="${proxied}" alt="${title} 이미지" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)">`;
+        }).join('');
 
-        try {
-            const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
-            const result = await response.json();
+        const showNav = list.length > 1;
+        const nav = showNav ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
 
-            if (!response.ok || !result.ok) throw new Error(result.error || '서버 업로드 실패');
+        container.innerHTML = `
+          <div class="carousel" data-slide="0" data-count="${list.length}">
+            ${nav}
+            <div class="slides">${slides}</div>
+          </div>`;
 
-            if (result.images) {
-                const key = `${title}|${addr}`;
-                const cached = DATA_CACHE.get(key) || { coords: null };
-                cached.images = result.images;
-                DATA_CACHE.set(key, cached);
-                setupCarousel(container, result.images, title, addr);
-            }
-        } catch (error) {
-            alert(`업로드 실패: ${error.message}`);
-            const key = `${title}|${addr}`;
-            const cachedImages = DATA_CACHE.get(key)?.images || [];
-            setupCarousel(container, cachedImages, title, addr);
+        const carousel = container.querySelector('.carousel');
+        updateCarouselState(carousel, 0);
+
+        if (showNav) {
+          carousel.addEventListener('click', (e) => {
+            const prev = e.target.closest('.cbtn.prev');
+            const next = e.target.closest('.cbtn.next');
+            if (!prev && !next) return;
+            const cur = parseInt(carousel.dataset.slide || '0', 10);
+            const count = parseInt(carousel.dataset.count || '0', 10);
+            if (prev) updateCarouselState(carousel, cur - 1);
+            if (next) updateCarouselState(carousel, Math.min(cur + 1, count - 1));
+          });
         }
       }
 
-      function setupCarousel(container, images, title, addr) {
-          const existingImages = images || [];
-          const imageCount = existingImages.length;
-          const uniqueId = `file-upload-${Math.random().toString(36).substr(2, 9)}`;
-
-          if (imageCount === 0) {
-              const uploaderHtml = `
-                  <div class="image-uploader standalone">
-                      <label for="${uniqueId}" class="uploader-label">📸 촬영하기 또는 업로드하기</label>
-                      <input id="${uniqueId}" type="file" class="uploader-input" accept="image/png, image/jpeg, image/gif">
-                  </div>`;
-              container.innerHTML = `<div class="no-image-placeholder">이미지 없음</div>` + uploaderHtml;
-          } else {
-              const slidesHtml = existingImages.map(src => {
-                  const proxiedSrc = (src.startsWith('/uploads')) ? src : `/img-proxy?u=${encodeURIComponent(src)}`;
-                  return `<div class="carousel-slide"><img src="${proxiedSrc}" alt="장소 사진" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`;
-              }).join('');
-              
-              let uploaderSlideHtml = '';
-              let finalSlideCount = imageCount;
-
-              if (imageCount < 4) {
-                  finalSlideCount = imageCount + 1;
-                  uploaderSlideHtml = `
-                      <div class="carousel-slide uploader-slide">
-                          <div class="image-uploader">
-                              <label for="${uniqueId}" class="uploader-label">📸 촬영하기 또는 업로드하기 (${imageCount}/4)</label>
-                              <input id="${uniqueId}" type="file" class="uploader-input" accept="image/png, image/jpeg, image/gif">
-                          </div>
-                      </div>`;
-              }
-              
-              const totalSlidesHtml = slidesHtml + uploaderSlideHtml;
-              const dotsHtml = imageCount > 0 ? `<div class="dots">${Array.from({ length: imageCount }, (_, i) => `<button type="button" class="dot ${i === 0 ? 'active' : ''}" data-i="${i}"></button>`).join('')}</div>` : '';
-              const buttonsHtml = finalSlideCount > 1 ? `<button class="cbtn prev" type="button">‹</button><button class="cbtn next" type="button">›</button>` : '';
-
-              container.innerHTML = `<div class="carousel" data-slide="0" data-count="${finalSlideCount}" data-image-count="${imageCount}">${buttonsHtml}<div class="slides-container"><div class="slides-track">${totalSlidesHtml}</div></div>${dotsHtml}</div>`;
-          }
-
-          const carousel = container.querySelector('.carousel');
-          if (carousel) {
-              updateCarouselState(carousel, 0);
-              carousel.addEventListener('click', (e) => {
-                  const target = e.target;
-                  let currentIndex = parseInt(carousel.dataset.slide || '0', 10);
-                  if (target.closest('.cbtn.next')) updateCarouselState(carousel, currentIndex + 1);
-                  else if (target.closest('.cbtn.prev')) updateCarouselState(carousel, currentIndex - 1);
-                  else if (target.matches('.dot')) updateCarouselState(carousel, parseInt(target.dataset.i, 10));
-              });
-          }
-
-          const fileInput = container.querySelector('.uploader-input');
-          if (fileInput) {
-              fileInput.addEventListener('change', (event) => {
-                  const file = event.target.files[0];
-                  if (file) handleImageUpload(file, title, addr, container);
-              });
-          }
-      }
-
       function setupMap(container, coords, title) {
-          if (!window.kakao || !window.kakao.maps) { container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>'; return; }
-          if (!coords || !coords.y || !coords.x) { container.innerHTML = '<div class="no-map-placeholder">위치 정보 없음</div>'; return; }
-          container.innerHTML = '';
-          const position = new kakao.maps.LatLng(coords.y, coords.x);
-          const map = new kakao.maps.Map(container, { center: position, level: 4 });
-          new kakao.maps.Marker({ map: map, position: position });
-          setTimeout(() => map.relayout(), 50);
+        if (!window.kakao || !window.kakao.maps) {
+          container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>';
+          return;
+        }
+        if (!coords || !coords.y || !coords.x) {
+          container.innerHTML = '<div class="no-map-placeholder">위치 정보 없음</div>';
+          return;
+        }
+        container.innerHTML = '';
+        const pos = new kakao.maps.LatLng(coords.y, coords.x);
+        const map = new kakao.maps.Map(container, { center: pos, level: 4 });
+        new kakao.maps.Marker({ map, position: pos });
+        setTimeout(() => map.relayout(), 50);
       }
-      
+
       async function updateMoveCardDetails(moveItem) {
-          const fromAddr = moveItem.dataset.fromAddr;
-          const toAddr = moveItem.dataset.toAddr;
-          if (!fromAddr || !toAddr) return;
+        const fromAddr = moveItem.dataset.fromAddr;
+        const toAddr = moveItem.dataset.toAddr;
+        if (!fromAddr || !toAddr) return;
 
-          const detailsEl = moveItem.querySelector('.move-details');
-          if (!detailsEl) return;
+        const detailsEl = moveItem.querySelector('.move-details');
+        if (!detailsEl) return;
 
-          try {
-              const [fromRes, toRes] = await Promise.all([
-                  fetch(`/api/nearest-transit?addr=${encodeURIComponent(fromAddr)}`),
-                  fetch(`/api/nearest-transit?addr=${encodeURIComponent(toAddr)}`)
-              ]);
-              const fromData = await fromRes.json();
-              const toData = await toRes.json();
+        const formatStation = (line, station) => {
+          if (!station) return '';
+          if (line && station.includes(line)) return station;
+          return line ? `${line} ${station}`.trim() : station;
+        };
 
-              if (!fromData.ok || !toData.ok) return;
+        try {
+          const [fromRes, toRes] = await Promise.all([
+            fetch(`/api/nearest-transit?addr=${encodeURIComponent(fromAddr)}`),
+            fetch(`/api/nearest-transit?addr=${encodeURIComponent(toAddr)}`)
+          ]);
+          const fromData = await fromRes.json();
+          const toData = await toRes.json();
+          if (!fromData.ok || !toData.ok) return;
 
-              const from = fromData.result;
-              const to = toData.result;
+          const from = fromData.result, to = toData.result;
+          let t1 = '', t2 = '';
 
-              let t1 = '', t2 = '';
-              let fromStation = '', toStation = '';
-
-              if (from.subway_station && to.subway_station && from.subway_station !== to.subway_station) {
-                  fromStation = formatStation(from.subway_line, from.subway_station);
-                  toStation = formatStation(to.subway_line, to.subway_station);
-                  t1 = `지하철 ${fromStation} 승차`;
-                  t2 = `${toStation} 하차`;
-              } 
-              else if (from.bus_station && to.bus_station && from.bus_station !== to.bus_station) {
-                  fromStation = from.bus_station;
-                  toStation = to.bus_station;
-                  t1 = `버스 ${fromStation} 승차`;
-                  t2 = `${toStation} 하차`;
-              }
-
-              if (t1 && detailsEl) {
-                  detailsEl.innerHTML = `
-                      <span class="chip ghost small">${t1}</span>
-                      <span class="chip ghost small">${t2}</span>
-                  `;
-              }
-          } catch (e) {
-              console.error("Failed to fetch live transit details:", e);
+          if (from.subway_station && to.subway_station && from.subway_station !== to.subway_station) {
+            t1 = `지하철 ${formatStation(from.subway_line, from.subway_station)} 승차`;
+            t2 = `${formatStation(to.subway_line, to.subway_station)} 하차`;
+          } else if (from.bus_station && to.bus_station && from.bus_station !== to.bus_station) {
+            t1 = `버스 ${from.bus_station} 승차`;
+            t2 = `${to.bus_station} 하차`;
           }
+
+          if (t1) {
+            detailsEl.innerHTML = `
+              <span class="chip ghost small">${t1}</span>
+              <span class="chip ghost small">${t2}</span>`;
+          }
+        } catch {}
       }
-      
-      async function initializeAllItems() {
-          const allItems = document.querySelectorAll('li.tl-item');
-          
-          const visits = Array.from(document.querySelectorAll('li.tl-item.visit'));
-          document.querySelectorAll('li.tl-item.move').forEach((moveNode, i) => {
-              if (visits[i] && visits[i+1]) {
-                  moveNode.dataset.fromAddr = visits[i].dataset.addr1;
-                  moveNode.dataset.toAddr = visits[i+1].dataset.addr1;
-              }
-          });
 
-          for(const item of allItems) {
-            if (item.classList.contains('visit')) {
-              const title = item.dataset.title;
-              const addr = item.dataset.addr1;
-              const data = await fetchPlaceData(title, addr);
-              if (!data) continue;
-              const carouselContainer = item.querySelector('.media-carousel-container');
-              const mapContainer = item.querySelector('.kakao-map-container');
-              if (carouselContainer) setupCarousel(carouselContainer, data.images, title, addr);
-              if (mapContainer) setupMap(mapContainer, data.coords, title);
-            }
-            else if (item.classList.contains('move')) {
-                const detailsEl = item.querySelector('.move-details');
-                const textSpan = detailsEl ? detailsEl.querySelector('span') : null;
-                if (textSpan && (textSpan.textContent || '').includes('→')) {
-                   updateMoveCardDetails(item);
-                }
+      async function initializeAllItems() {
+        const allItems = document.querySelectorAll('li.tl-item');
+        const visits = Array.from(document.querySelectorAll('li.tl-item.visit'));
+        document.querySelectorAll('li.tl-item.move').forEach((moveNode, i) => {
+          if (visits[i] && visits[i+1]) {
+            moveNode.dataset.fromAddr = visits[i].dataset.addr1;
+            moveNode.dataset.toAddr   = visits[i+1].dataset.addr1;
+          }
+        });
+
+        for (const item of allItems) {
+          if (item.classList.contains('visit')) {
+            const title = item.dataset.title;
+            const addr  = item.dataset.addr1;
+            const { images, coords } = await fetchPlaceMedia(title, addr);
+
+            const carouselContainer = item.querySelector('.media-carousel-container');
+            const mapContainer      = item.querySelector('.kakao-map-container');
+
+            if (carouselContainer) setupCarousel(carouselContainer, images, title);
+            if (mapContainer)      setupMap(mapContainer, coords, title);
+          } else if (item.classList.contains('move')) {
+            const detailsEl = item.querySelector('.move-details');
+            const textSpan  = detailsEl ? detailsEl.querySelector('span') : null;
+            if (textSpan && (textSpan.textContent || '').includes('→')) {
+              updateMoveCardDetails(item);
             }
           }
+        }
       }
 
       if (window.kakao && window.kakao.maps) {
-          kakao.maps.load(initializeAllItems);
+        kakao.maps.load(initializeAllItems);
       } else if (document.querySelector('.kakao-map-container')) {
-          initializeAllItems();
+        initializeAllItems();
       }
     });
   </script>

@@ -113,17 +113,51 @@
         <h2 class="section-title">전체 여행지 둘러보기</h2>
         <p class="muted">다양한 여행지를 확인해보세요</p>
 
+        <!-- 🔧 필터 + 검색 + 정렬 툴바 -->
         <div class="toolbar">
-          <span id="sortLabel" class="sort-label">정렬</span>
-          <div id="sortDropdown" class="sort-dropdown" data-current="review" aria-labelledby="sortLabel">
-            <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
-              <span class="label">인기도 지수</span>
-              <span class="chev" aria-hidden="true">▾</span>
-            </button>
-            <ul class="sort-menu" role="listbox">
-              <li role="option" data-value="review" aria-selected="true">인기도 지수</li>
-              <li role="option" data-value="tour">관광 지수</li>
-            </ul>
+          <!-- 지역 -->
+          <div class="filter-group">
+            <label for="sido-filter">지역</label>
+            <select id="sido-filter" class="filter-select">
+              <option value="all">전체</option>
+            </select>
+          </div>
+
+          <!-- 대분류 -->
+          <div class="filter-group">
+            <label for="cat1-filter">테마</label>
+            <select id="cat1-filter" class="filter-select">
+              <option value="all">전체</option>
+            </select>
+          </div>
+
+          <!-- 소분류 -->
+          <div class="filter-group">
+            <label for="cat3-filter">상세테마</label>
+            <select id="cat3-filter" class="filter-select">
+              <option value="all">전체</option>
+            </select>
+          </div>
+
+          <!-- 검색 -->
+          <div class="filter-group search-group">
+            <label for="search-input">검색</label>
+            <input id="search-input" class="filter-search" type="search" placeholder="장소명 검색" />
+          </div>
+
+          <!-- 정렬 -->
+          <div class="filter-group sort-group">
+            <label id="sortLabel">정렬</label>
+            <div id="sortDropdown" class="sort-dropdown" data-current="review" aria-labelledby="sortLabel">
+              <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="label">인기도 지수</span>
+                <span class="chev" aria-hidden="true">▾</span>
+              </button>
+              <ul class="sort-menu" role="listbox">
+                <li role="option" data-value="review" aria-selected="true">인기도 지수</li>
+                <li role="option" data-value="tour">관광 지수</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -138,10 +172,10 @@
     </section>
   </main>
 
-  <script src="{{ url_for('static', filename='js/home.js') }}?v=5"></script>
+  <script src="{{ url_for('static', filename='js/home.js') }}?v=6"></script>
 
   <noscript>
-    <div style="max-width:960px;margin:24px auto;padding:12px;border:1px solid #ccc;border-radius:12px">
+    <div style="max-width:1100px;margin:24px auto;padding:12px;border:1px solid #ccc;border-radius:12px">
       이 페이지는 자바스크립트가 필요합니다. 브라우저 설정에서 JavaScript를 활성화해 주세요.
     </div>
   </noscript>

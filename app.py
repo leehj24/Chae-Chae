@@ -38,6 +38,7 @@ from recommend.config import (
 # Import recommendation engine modules
 import recommend.run_walk as run_walk_module
 import recommend.run_transit as run_transit_module
+from filter.utils import get_filter_options
 
 BASE_DIR = Path(__file__).resolve().parent
 app = Flask(
@@ -72,6 +73,19 @@ BOT_PROMPTS = {
     "기간": "<b>여행 기간</b>을 선택해 주세요. 시작~종료 날짜를 고르면 <em>총 일수</em>가 자동 계산돼요.",
     "이동수단": "마지막으로, <b>어떤 이동수단</b>으로 맞출까요?",
     "실행중": "<div class='spinner'></div>모든 정보를 확인했어요.<br>이제 최적의 여행 경로를 만들고 있어요. 잠시만 기다려 주세요!",
+}
+
+# ---------- Sido Map for Filtering ----------
+sido_map = {
+    '서울': '서울특별시', '서울특별시': '서울특별시', '서울시': '서울특별시', '부산': '부산광역시', '부산광역시': '부산광역시',
+    '대구': '대구광역시', '대구광역시': '대구광역시', '인천': '인천광역시', '인천광역시': '인천광역시',
+    '광주': '광주광역시', '광주광역시': '광주광역시', '대전': '대전광역시', '대전광역시': '대전광역시',
+    '울산': '울산광역시', '울산광역시': '울산광역시', '울산시': '울산광역시', '세종': '세종특별자치시', '세종특별자치시': '세종특별자치시',
+    '경기': '경기도', '경기도': '경기도', '강원': '강원', '강원도': '강원', '강원특별자치도': '강원',
+    '충남': '충청남도', '충청남도': '충청남도', '충북': '충청북도', '충청북도': '충청북도',
+    '전남': '전라남도', '전라남도': '전라남도', '전북': '전라북도', '전라북도': '전라북도', '전북특별자치도': '전라북도',
+    '경남': '경상남도', '경상남도': '경상남도', '경북': '경상북도', '경상북도': '경상북도',
+    '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
 }
 
 # ---------- Common Utilities ----------
@@ -112,18 +126,22 @@ _PLACES_CACHE = {"df": None, "mtime": None, "path": None}
 
 def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
-        try: return pd.read_csv(path, encoding=enc)
-        except Exception: pass
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except Exception:
+            pass
     raise IOError(f"Failed to read CSV file with common encodings: {path}")
 
 def _pick_column(df: pd.DataFrame, *names: str) -> str | None:
     low = {c.lower(): c for c in df.columns}
     for n in names:
-        if n.lower() in low: return low[n.lower()]
+        if n.lower() in low:
+            return low[n.lower()]
     for c in df.columns:
         cl = c.lower()
         for n in names:
-            if n.lower() in cl: return c
+            if n.lower() in cl:
+                return c
     return None
 
 def _load_places_df() -> pd.DataFrame:
@@ -151,18 +169,17 @@ def _load_places_df() -> pd.DataFrame:
     }
     rename_map = {v: k for k, v in req.items() if v}
     for k, v in opt.items():
-        if v: rename_map[v] = k
+        if v:
+            rename_map[v] = k
     df = df.rename(columns=rename_map)
 
     for c in ("cat3", "firstimage"):
-        if c not in df.columns: df[c] = ""
-    
-    # ▼▼▼ [수정] score 컬럼이 없거나 비어있을 경우 0으로 처리 ▼▼▼
+        if c not in df.columns:
+            df[c] = ""
     for c in ("tour_score", "review_score"):
-        # 컬럼이 없으면 0으로 채우고, 있으면 숫자 변환 실패 시(NaN) 0으로 채웁니다.
-        if c not in df.columns: df[c] = 0
+        if c not in df.columns:
+            df[c] = 0
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-    # ▲▲▲ [수정] ▲▲▲
 
     for c in ("title", "addr1", "cat1", "cat3", "firstimage"):
         df[c] = df[c].astype(str).fillna("")
@@ -176,7 +193,7 @@ def _sort_key_from_param(s: str) -> tuple[str, str]:
     return ("review_score", "인기도 지수") if s in {"popular", "review", "review_score", "인기도"} else ("tour_score", "관광 지수")
 
 # ─────────────────────────────────────────
-# User Uploads Management (NEW)
+# User Uploads Management
 # ─────────────────────────────────────────
 PATH_USER_UPLOADS = str(BASE_DIR / "_user_uploads.json")
 _USER_UPLOADS_CACHE = {"data": None, "mtime": None}
@@ -194,7 +211,6 @@ def _load_user_uploads():
             mtime = p.stat().st_mtime
             if _USER_UPLOADS_CACHE["data"] is not None and _USER_UPLOADS_CACHE["mtime"] == mtime:
                 return _USER_UPLOADS_CACHE["data"]
-            
             data = json.loads(p.read_text(encoding="utf-8"))
             _USER_UPLOADS_CACHE["data"] = data
             _USER_UPLOADS_CACHE["mtime"] = mtime
@@ -228,7 +244,7 @@ def _load_image_cache() -> dict:
     if not p.exists():
         _IMAGE_CACHE = {}
         return _IMAGE_CACHE
-    
+
     try:
         _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, IOError):
@@ -260,31 +276,31 @@ def _addr_region_tokens(addr1: str) -> List[str]:
     return [w for w in cand if w][:3]
 
 def _kakao_image_search(query: str, size: int = 4) -> List[str]:
-    if not KAKAO_API_KEY: return []
+    if not KAKAO_API_KEY:
+        return []
     _ensure_session()
     try:
         params = {"query": query, "sort": "accuracy", "page": 1, "size": max(1, min(10, int(size)))}
         r = _SESSION.get("https://dapi.kakao.com/v2/search/image", params=params, timeout=4)
-        if not r.ok: return []
+        if not r.ok:
+            return []
         docs = r.json().get("documents", []) or []
         urls = [d.get("image_url") for d in docs if str(d.get("image_url") or "").startswith("http")]
         return [u for u in urls if len(u) < 2000]
-    except Exception: return []
+    except Exception:
+        return []
 
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     cache = _load_image_cache()
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-    
     if key in cache:
         return cache[key].get("urls", [])[:max_n]
-    
     return []
 
 def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     key = f"{_nfc(title)}|{_nfc(addr1)}"
     query = " ".join([title, *_addr_region_tokens(addr1)])
     urls = _kakao_image_search(query, size=4)
-    
     cache = _load_image_cache()
     cache[key] = {
         "q": query,
@@ -294,31 +310,65 @@ def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     _save_image_cache()
     return urls
 
-def _get_all_images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
+# ===== 이미지 합성 우선순위 로직 (firstimage → JSON 캐시 → 업로드(옵션)) =====
+def _get_all_images_for_place(
+    title: str,
+    addr1: str,
+    max_n: int = 4,
+    include_user_uploads: bool = False,
+    auto_fetch_if_needed: bool = False,  # ✅ 필요하면 라이브 검색까지
+) -> List[str]:
+    """
+    우선순위:
+      ① CSV firstimage(첫 장 1개만)
+      ② Kakao/캐시 JSON (비어 있고 auto_fetch_if_needed=True면 라이브 검색으로 채움)
+      ③ 사용자 업로드(옵션)
+    """
     key = f"{_nfc(title)}|{_nfc(addr1)}"
 
-    # 1. User uploaded images (highest priority)
-    uploads_db = _load_user_uploads()
-    user_filenames = uploads_db.get(key, [])
-    user_imgs = [url_for('uploaded_file', filename=f) for f in user_filenames]
-
-    # 2. Kakao cached images
-    kakao_imgs = _images_for_place(title, addr1, max_n=4)
-
-    # 3. CSV firstimage as a fallback
+    # ① CSV firstimage (최우선 하나)
     df = _load_places_df()
-    match = df[(df['title'].apply(_nfc) == _nfc(title)) & (df['addr1'].apply(_nfc) == _nfc(addr1))]
-    csv_imgs = []
+    csv_imgs: list[str] = []
+    match = df[
+        (df['title'].apply(_nfc) == _nfc(title)) &
+        (df['addr1'].apply(_nfc) == _nfc(addr1))
+    ]
     if not match.empty:
-      csv_img_url = match.iloc[0].get('firstimage')
-      if csv_img_url and isinstance(csv_img_url, str) and csv_img_url.strip():
-          csv_imgs.append(csv_img_url)
+        u = str(match.iloc[0].get('firstimage') or '').strip()
+        if u and isinstance(u, str) and u.lower().startswith('http'):
+            csv_imgs.append(u)
 
-    combined = list(dict.fromkeys(user_imgs + kakao_imgs + csv_imgs))
-    return combined[:max_n]
+    # ② Kakao/캐시 JSON
+    kakao_imgs = _images_for_place(title, addr1, max_n=4)
+    if not kakao_imgs and auto_fetch_if_needed:
+        # 캐시가 비었으면 라이브 검색 → 캐시 저장
+        _fetch_and_cache_images_live(title, addr1)
+        kakao_imgs = _images_for_place(title, addr1, max_n=4)
+
+    # ③ 사용자 업로드(필요 시만)
+    user_imgs: list[str] = []
+    if include_user_uploads:
+        uploads_db = _load_user_uploads()
+        user_uploads = uploads_db.get(key, [])
+        user_imgs = [
+            url_for('uploaded_file', filename=f) if not str(f).startswith('http') else str(f)
+            for f in user_uploads
+        ]
+
+    ordered: list[str] = []
+    if csv_imgs:
+        ordered.append(csv_imgs[0])  # 첫 장
+    ordered.extend(kakao_imgs)       # 2장부터
+    ordered.extend(user_imgs)        # 업로드는 맨 뒤
+
+    # 정리
+    ordered = [u for u in ordered if isinstance(u, str) and u.strip()]
+    ordered = list(dict.fromkeys(ordered))[:max_n]
+    return ordered
 
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
-    if not KAKAO_API_KEY: return None
+    if not KAKAO_API_KEY:
+        return None
     _ensure_session()
     try:
         if addr1:
@@ -326,13 +376,14 @@ def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, 
             if r.ok and r.json().get("documents"):
                 d = r.json()["documents"][0]
                 return float(d["y"]), float(d["x"])
-        
+
         q_kw = " ".join([_nfc(query), *_addr_region_tokens(addr1)])
         r = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", params={"query": q_kw, "size": 1}, timeout=4)
         if r.ok and r.json().get("documents"):
             d = r.json()["documents"][0]
             return float(d["y"]), float(d["x"])
-    except Exception: pass
+    except Exception:
+        pass
     return None
 
 def _nearest_subway(lat, lon) -> Tuple[str, str]:
@@ -348,7 +399,8 @@ def _nearest_subway(lat, lon) -> Tuple[str, str]:
                 raw = " ".join([name, _nfc(d.get("category_name", "")), _nfc(d.get("address_name", "")), _nfc(d.get("road_address_name", ""))])
                 m = re.search(r"(\d+)\s*호선", raw)
                 return name, f"{m.group(1)}호선" if m else ""
-    except Exception: pass
+    except Exception:
+        pass
     return "", ""
 
 def _nearest_bus(lat, lon) -> str:
@@ -362,9 +414,12 @@ def _nearest_bus(lat, lon) -> str:
                     docs = sorted(resp.json().get("documents", []), key=lambda d: int(float(d.get("distance", "1e9"))))
                     for d in docs:
                         nm = _nfc(d.get("place_name"))
-                        if any(k in nm for k in ["정류", "버스", "정류장", "정류소"]): return nm
-                    if docs: return _nfc(docs[0].get("place_name"))
-    except Exception: pass
+                        if any(k in nm for k in ["정류", "버스", "정류장", "정류소"]):
+                            return nm
+                    if docs:
+                        return _nfc(docs[0].get("place_name"))
+    except Exception:
+        pass
     return ""
 
 # ─────────────────────────────────────────
@@ -372,7 +427,7 @@ def _nearest_bus(lat, lon) -> str:
 # ─────────────────────────────────────────
 def initialize_image_cache():
     print("--- 🖼️  이미지 캐시 초기화를 시작합니다 ---")
-    
+
     if not KAKAO_API_KEY:
         print("⛔️ KAKAO_API_KEY가 설정되지 않아 이미지 캐싱을 건너뜁니다.")
         return
@@ -406,19 +461,12 @@ def initialize_image_cache():
     save_interval = 50
 
     pbar = tqdm(new_items_to_fetch, total=len(new_items_to_fetch), desc="이미지 검색 중")
-    
+
     for item in pbar:
         key, title, addr1 = item["key"], item["title"], item["addr1"]
         pbar.set_description(f"'{title[:10]}...' 검색")
-        
-        query = " ".join([title, *_addr_region_tokens(addr1)])
-        urls = _kakao_image_search(query, size=4)
-        
-        cache[key] = {
-            "q": query,
-            "urls": urls,
-            "ts": int(datetime.now().timestamp())
-        }
+
+        _fetch_and_cache_images_live(title, addr1)
         new_items_count += 1
         time.sleep(0.05)
 
@@ -429,7 +477,7 @@ def initialize_image_cache():
     if new_items_count > 0:
         _save_image_cache()
         print(f"\n✅ {new_items_count}개 항목 추가 완료! 최종 캐시 크기: {len(cache):,}개.")
-    
+
     print("--- ✅ 이미지 캐시 초기화 완료 ---")
 
 def start_self_pinging():
@@ -522,7 +570,7 @@ def chat():
             messages.append({"sender": "user", "text": transport_text})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["실행중"]})
             session["state"] = "실행중"
-    
+
     session["messages"] = messages
     _trim_msgs()
     return redirect(url_for("index"))
@@ -537,13 +585,13 @@ def do_generate():
             "days": session.get("days"),
             "transport_mode": session.get("transport_mode"),
         }
-        
+
         if not all(params.values()):
             raise ValueError("필수 입력값이 누락되었습니다.")
 
         engine = run_walk_module if params["transport_mode"] == "walk" else run_transit_module
         itinerary_df = engine.run(**params)
-        
+
         session["itinerary"] = _df_to_records(itinerary_df)
         session["state"] = "완료"
 
@@ -554,7 +602,7 @@ def do_generate():
             messages[-1]["html"] = completion_html
         else:
             messages.append({"sender": "bot", "html": completion_html})
-        
+
         session["messages"] = messages
         return _json({"ok": True})
 
@@ -590,6 +638,15 @@ def go_back():
 # ─────────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────────
+@app.get("/api/filter-options")
+def api_filter_options():
+    try:
+        options = get_filter_options()
+        return _json({"ok": True, "options": options})
+    except Exception as e:
+        traceback.print_exc()
+        return _json({"ok": False, "error": str(e)}, 500)
+
 @app.get("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
@@ -609,7 +666,10 @@ def upload_image():
     uploads = _load_user_uploads()
     current_images = uploads.get(key, [])
 
-    all_images_before_upload = _get_all_images_for_place(title, addr1)
+    # 업로드 전 현재 합성 결과(업로드 포함) 확인하여 최대 4장 제한
+    all_images_before_upload = _get_all_images_for_place(
+        title, addr1, include_user_uploads=True, auto_fetch_if_needed=True
+    )
     if len(all_images_before_upload) >= 4:
         return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
 
@@ -621,29 +681,67 @@ def upload_image():
     uploads[key] = current_images
     _save_user_uploads(uploads)
 
-    all_images_after_upload = _get_all_images_for_place(title, addr1)
+    all_images_after_upload = _get_all_images_for_place(
+        title, addr1, include_user_uploads=True, auto_fetch_if_needed=True
+    )
     return _json({"ok": True, "images": all_images_after_upload})
 
 @app.get("/api/places")
 def api_places():
     try:
         df = _load_places_df()
-        title_q = (request.args.get("title") or "").strip()
-        addr1_q = (request.args.get("addr1") or "").strip()
 
+        # 1. 필터 파라미터 가져오기
+        sido = request.args.get("sido")
+        cat1 = request.args.get("cat1")
+        cat3 = request.args.get("cat3")
+        query = request.args.get("q")
+
+        # 2. 필터링 적용
+        filtered_df = df.copy()
+        if sido and sido != 'all':
+            sido_val = sido
+            if '강원' in sido_val: sido_prefix = '강원'
+            elif '제주' in sido_val: sido_prefix = '제주'
+            else: sido_prefix = sido_val
+            filtered_df = filtered_df[filtered_df['addr1'].str.startswith(sido_prefix, na=False)]
+
+        if cat1 and cat1 != 'all':
+            filtered_df = filtered_df[filtered_df['cat1'] == cat1]
+
+        if cat3 and cat3 != 'all':
+            filtered_df = filtered_df[filtered_df['cat3'].str.contains(cat3, na=False)]
+
+        if query:
+            query_nfc = _nfc(query).lower()
+            filtered_df = filtered_df[filtered_df['title'].str.lower().str.contains(query_nfc, na=False)]
+
+        # 3. 정렬 적용
+        sort = request.args.get("sort", "review")
+        score_col, score_label = _sort_key_from_param(sort)
+        df_sorted = filtered_df.sort_values(by=[score_col], ascending=[False], na_position="last").reset_index(drop=True)
+
+        # 4. 페이지네이션 적용
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(100, int(request.args.get("per_page", 40))))
+
+        total = len(df_sorted)
+        total_pages = max(1, math.ceil(total / per_page))
+        page = min(page, total_pages)
+        start, end = (page - 1) * per_page, page * per_page
+
+        view = df_sorted.iloc[start:end].copy()
+        view["rank"] = range(start + 1, start + 1 + len(view))
+
+        # 5. 최종 결과 처리 (이미지 추가 등)
         def process_view_to_items(view_df: pd.DataFrame) -> List[Dict]:
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                key = f"{title}|{addr1}"
-                
-                all_images = _get_all_images_for_place(title, addr1, max_n=4)
-                
-                image_cache = _load_image_cache()
-                if not all_images and key not in image_cache:
-                    _fetch_and_cache_images_live(title, addr1)
-                    all_images = _get_all_images_for_place(title, addr1, max_n=4)
-
+                # 홈 그리드: 업로드 제외, firstimage → JSON 우선순위, 필요 시 라이브 페치 자동
+                all_images = _get_all_images_for_place(
+                    title, addr1, max_n=4, include_user_uploads=False, auto_fetch_if_needed=True
+                )
                 items_list.append({
                     "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
                     "cat1":  str(r.get("cat1", "")), "cat3":  str(r.get("cat3", "")),
@@ -653,47 +751,40 @@ def api_places():
                 })
             return items_list
 
-        if title_q and addr1_q:
-            mask = (df["title"].apply(_nfc) == _nfc(title_q)) & (df["addr1"].apply(_nfc) == _nfc(addr1_q))
-            view = df[mask]
-            return _json({"ok": True, "items": process_view_to_items(view)})
-        else:
-            sort = request.args.get("sort", "review")
-            page = max(1, int(request.args.get("page", 1)))
-            per_page = max(1, min(100, int(request.args.get("per_page", 40))))
-            score_col, score_label = _sort_key_from_param(sort)
-
-            if score_col not in df.columns:
-                df_sorted = df.copy()
-            else:
-                df_sorted = df.sort_values(by=[score_col], ascending=[False], na_position="last").reset_index(drop=True)
-
-            total, total_pages = len(df_sorted), max(1, math.ceil(len(df_sorted) / per_page))
-            page = min(page, total_pages)
-            start, end = (page - 1) * per_page, page * per_page
-
-            view = df_sorted.iloc[start:end].copy()
-            view["rank"] = range(start + 1, start + 1 + len(view))
-            
-            return _json({
-                "ok": True, "sort_label": score_label, "sort_col": score_col, "total": total, 
-                "page": page, "per_page": per_page, "total_pages": total_pages, 
-                "items": process_view_to_items(view),
-            })
+        return _json({
+            "ok": True, "sort_label": score_label, "sort_col": score_col, "total": total,
+            "page": page, "per_page": per_page, "total_pages": total_pages,
+            "items": process_view_to_items(view),
+        })
     except Exception as e:
-        # ▼▼▼ [수정] 터미널에 상세 오류 로그를 출력하도록 수정 ▼▼▼
         print("❌ API Error in /api/places:")
         traceback.print_exc()
-        # ▲▲▲ [수정] ▲▲▲
-        return _json({"ok": False, "error": str(e), "trace": traceback.format_exc(limit=4)}, 500)
+        return _json({"ok": False, "error": str(e)}, 500)
+
+# 단건 장소용 이미지/좌표 API (인덱스 타임라인에서 사용)
+@app.get("/api/place-media")
+def api_place_media():
+    title = _nfc(request.args.get("title", ""))
+    addr1 = _nfc(request.args.get("addr1", ""))
+    if not title or not addr1:
+        return _json({"ok": False, "error": "title and addr1 are required."}, 400)
+
+    images = _get_all_images_for_place(
+        title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
+    )
+    coords = _kakao_geocode_coords(title, addr1)
+    payload: Dict[str, Any] = {"ok": True, "images": images}
+    if coords:
+        payload["coords"] = {"y": coords[0], "x": coords[1]}
+    return _json(payload)
 
 @app.get("/api/geocode")
 def api_geocode():
     title = (request.args.get("title") or "").strip()
     addr = (request.args.get("addr") or "").strip()
-    if not title and not addr: 
+    if not title and not addr:
         return _json({"ok": False, "error": "Query parameter 'title' or 'addr' is required."}, 400)
-    
+
     coords = _kakao_geocode_coords(title or addr, addr1=addr)
     if not coords:
         return _json({"ok": False, "error": "Geocoding failed. Location not found."})
@@ -704,16 +795,16 @@ def api_nearest_transit():
     addr = (request.args.get("addr") or "").strip()
     if not addr:
         return _json({"ok": False, "error": "Query parameter 'addr' is required."}, 400)
-    
+
     coords = _kakao_geocode_coords(addr, addr1=addr)
     if not coords:
         return _json({"ok": False, "error": f"Geocoding failed for address: {addr}"})
-    
+
     lat, lon = coords
-    
+
     subway_station, subway_line = _nearest_subway(lat, lon)
     bus_station = _nearest_bus(lat, lon)
-    
+
     return _json({
         "ok": True,
         "result": {
@@ -729,12 +820,16 @@ def api_nearest_transit():
 @app.get("/img-proxy")
 def img_proxy():
     url = request.args.get("u")
-    if not url or not url.startswith("http"): return abort(400)
+    if not url or not url.startswith("http"):
+        return abort(400)
     try:
         _ensure_session()
         r = _SESSION.get(url, stream=True, timeout=15, headers={"Referer": ""})
         r.raise_for_status()
-        headers = {"Content-Type": r.headers.get("Content-Type", "image/jpeg"), "Cache-Control": "public, max-age=86400"}
+        headers = {
+            "Content-Type": r.headers.get("Content-Type", "image/jpeg"),
+            "Cache-Control": "public, max-age=86400"
+        }
         return Response(r.iter_content(chunk_size=8192), status=r.status_code, headers=headers)
     except requests.exceptions.RequestException:
         return abort(502)
@@ -748,8 +843,8 @@ if __name__ == "__main__":
         print("터미널에서 아래 명령어를 실행하여 설치해주세요.")
         print("pip install tqdm")
         print("="*50)
-    
+
     initialize_image_cache()
     start_self_pinging()
-    
+
     app.run(host="0.0.0.0", port=5000, debug=True)
