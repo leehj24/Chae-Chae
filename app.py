@@ -20,7 +20,9 @@ import pandas as pd
 import unicodedata as ud
 import requests
 from werkzeug.utils import secure_filename
-from tqdm import tqdm
+
+# [수정] tqdm 라이브러리는 더 이상 시작 스크립트에 필요 없으므로 삭제 가능
+# from tqdm import tqdm 
 
 from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort, send_from_directory)
 from flask_session import Session
@@ -307,26 +309,18 @@ def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
         "urls": urls,
         "ts": int(datetime.now().timestamp())
     }
+    # 라이브 검색 후에는 항상 캐시 저장
     _save_image_cache()
     return urls
 
-# ===== 이미지 합성 우선순위 로직 (firstimage → JSON 캐시 → 업로드(옵션)) =====
 def _get_all_images_for_place(
     title: str,
     addr1: str,
     max_n: int = 4,
     include_user_uploads: bool = False,
-    auto_fetch_if_needed: bool = False,  # ✅ 필요하면 라이브 검색까지
+    auto_fetch_if_needed: bool = False,
 ) -> List[str]:
-    """
-    우선순위:
-      ① CSV firstimage(첫 장 1개만)
-      ② Kakao/캐시 JSON (비어 있고 auto_fetch_if_needed=True면 라이브 검색으로 채움)
-      ③ 사용자 업로드(옵션)
-    """
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-
-    # ① CSV firstimage (최우선 하나)
     df = _load_places_df()
     csv_imgs: list[str] = []
     match = df[
@@ -338,14 +332,10 @@ def _get_all_images_for_place(
         if u and isinstance(u, str) and u.lower().startswith('http'):
             csv_imgs.append(u)
 
-    # ② Kakao/캐시 JSON
     kakao_imgs = _images_for_place(title, addr1, max_n=4)
     if not kakao_imgs and auto_fetch_if_needed:
-        # 캐시가 비었으면 라이브 검색 → 캐시 저장
-        _fetch_and_cache_images_live(title, addr1)
-        kakao_imgs = _images_for_place(title, addr1, max_n=4)
+        kakao_imgs = _fetch_and_cache_images_live(title, addr1)
 
-    # ③ 사용자 업로드(필요 시만)
     user_imgs: list[str] = []
     if include_user_uploads:
         uploads_db = _load_user_uploads()
@@ -357,11 +347,10 @@ def _get_all_images_for_place(
 
     ordered: list[str] = []
     if csv_imgs:
-        ordered.append(csv_imgs[0])  # 첫 장
-    ordered.extend(kakao_imgs)       # 2장부터
-    ordered.extend(user_imgs)        # 업로드는 맨 뒤
+        ordered.append(csv_imgs[0])
+    ordered.extend(kakao_imgs)
+    ordered.extend(user_imgs)
 
-    # 정리
     ordered = [u for u in ordered if isinstance(u, str) and u.strip()]
     ordered = list(dict.fromkeys(ordered))[:max_n]
     return ordered
@@ -391,14 +380,12 @@ def _nearest_subway(lat, lon) -> Tuple[str, str]:
     try:
         params = {"category_group_code": "SW8", "x": lon, "y": lat, "radius": 900, "size": 1, "sort": "distance"}
         r = _SESSION.get("https://dapi.kakao.com/v2/local/search/category.json", params=params, timeout=4)
-        if r.ok:
-            docs = r.json().get("documents", [])
-            if docs:
-                d = docs[0]
-                name = _nfc(d.get("place_name"))
-                raw = " ".join([name, _nfc(d.get("category_name", "")), _nfc(d.get("address_name", "")), _nfc(d.get("road_address_name", ""))])
-                m = re.search(r"(\d+)\s*호선", raw)
-                return name, f"{m.group(1)}호선" if m else ""
+        if r.ok and (docs := r.json().get("documents")):
+            d = docs[0]
+            name = _nfc(d.get("place_name"))
+            raw = " ".join([name, _nfc(d.get("category_name", "")), _nfc(d.get("address_name", "")), _nfc(d.get("road_address_name", ""))])
+            m = re.search(r"(\d+)\s*호선", raw)
+            return name, f"{m.group(1)}호선" if m else ""
     except Exception:
         pass
     return "", ""
@@ -425,60 +412,8 @@ def _nearest_bus(lat, lon) -> str:
 # ─────────────────────────────────────────
 # Startup Functions
 # ─────────────────────────────────────────
-def initialize_image_cache():
-    print("--- 🖼️  이미지 캐시 초기화를 시작합니다 ---")
-
-    if not KAKAO_API_KEY:
-        print("⛔️ KAKAO_API_KEY가 설정되지 않아 이미지 캐싱을 건너뜁니다.")
-        return
-
-    try:
-        df = _load_places_df()
-        df = df[["title", "addr1"]].copy()
-        print(f"✅ 원본 CSV 로드 완료. 고유 장소 {len(df):,}개.")
-    except Exception as e:
-        print(f"⛔️ CSV 파일('{PATH_TMF}') 로드 실패: {e}")
-        return
-
-    cache = _load_image_cache()
-    print(f"✅ 기존 캐시 로드 완료. {len(cache):,}개 항목 존재.")
-
-    new_items_to_fetch = []
-    for _, row in df.iterrows():
-        title = _nfc(row["title"])
-        addr1 = _nfc(row["addr1"])
-        key = f"{title}|{addr1}"
-        if key not in cache:
-            new_items_to_fetch.append({"key": key, "title": title, "addr1": addr1})
-
-    if not new_items_to_fetch:
-        print("✨ 모든 장소의 이미지가 이미 캐시되어 있습니다. 동기화 완료!")
-        return
-
-    print(f"🚚 총 {len(new_items_to_fetch):,}개의 새로운 장소 이미지를 가져옵니다...")
-
-    new_items_count = 0
-    save_interval = 50
-
-    pbar = tqdm(new_items_to_fetch, total=len(new_items_to_fetch), desc="이미지 검색 중")
-
-    for item in pbar:
-        key, title, addr1 = item["key"], item["title"], item["addr1"]
-        pbar.set_description(f"'{title[:10]}...' 검색")
-
-        _fetch_and_cache_images_live(title, addr1)
-        new_items_count += 1
-        time.sleep(0.05)
-
-        if new_items_count > 0 and new_items_count % save_interval == 0:
-            _save_image_cache()
-            pbar.set_description(f"💾 중간 저장 완료")
-
-    if new_items_count > 0:
-        _save_image_cache()
-        print(f"\n✅ {new_items_count}개 항목 추가 완료! 최종 캐시 크기: {len(cache):,}개.")
-
-    print("--- ✅ 이미지 캐시 초기화 완료 ---")
+# [삭제] 메모리 초과 및 서버 시작 지연을 유발하는 전체 이미지 캐싱 함수 삭제
+# def initialize_image_cache(): ...
 
 def start_self_pinging():
     def self_ping_task():
@@ -486,10 +421,8 @@ def start_self_pinging():
         if not ping_url:
             print("⚠️ self-ping: RENDER_EXTERNAL_URL 환경 변수가 없어 셀프 핑을 건너뜁니다.")
             return
-
         interval_seconds = 600
         print(f"🚀 self-ping: 셀프 핑 스레드를 시작합니다. 대상: {ping_url}, 주기: {interval_seconds}초")
-
         while True:
             try:
                 time.sleep(interval_seconds)
@@ -499,7 +432,6 @@ def start_self_pinging():
                 print(f"❌ self-ping: 셀프 핑 실패: {e}")
             except Exception as e:
                 print(f"❌ self-ping: 알 수 없는 오류 발생: {e}")
-
     ping_thread = threading.Thread(target=self_ping_task, daemon=True)
     ping_thread.start()
 
@@ -528,7 +460,6 @@ def chat():
             messages.append({"sender": "user", "text": region})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["점수"]})
             session["state"] = "점수"
-
     elif state == "점수":
         score = request.form.get("score", "").strip()
         if score in {"관광지수", "인기도지수"}:
@@ -536,7 +467,6 @@ def chat():
             messages.append({"sender": "user", "text": score})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["테마"]})
             session["state"] = "테마"
-
     elif state == "테마":
         themes_str = request.form.get("themes", "").strip()
         if themes_str:
@@ -545,7 +475,6 @@ def chat():
             messages.append({"sender": "user", "text": ", ".join(themes)})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["기간"]})
             session["state"] = "기간"
-
     elif state == "기간":
         start_date_str = request.form.get("start_date")
         end_date_str = request.form.get("end_date")
@@ -561,7 +490,6 @@ def chat():
                 session["state"] = "이동수단"
         except (ValueError, TypeError):
             pass
-
     elif state == "이동수단":
         transport = request.form.get("transport", "").strip()
         if transport in {"walk", "transit"}:
@@ -585,35 +513,25 @@ def do_generate():
             "days": session.get("days"),
             "transport_mode": session.get("transport_mode"),
         }
-
         if not all(params.values()):
             raise ValueError("필수 입력값이 누락되었습니다.")
-
         engine = run_walk_module if params["transport_mode"] == "walk" else run_transit_module
         itinerary_df = engine.run(**params)
-
         session["itinerary"] = _df_to_records(itinerary_df)
         session["state"] = "완료"
-
         messages = session.get("messages", [])
         completion_html = "완료! 추천 일정을 아래에 표시했어요."
-
         if messages and messages[-1].get("sender") == "bot" and "spinner" in messages[-1].get("html", ""):
             messages[-1]["html"] = completion_html
         else:
             messages.append({"sender": "bot", "html": completion_html})
-
         session["messages"] = messages
         return _json({"ok": True})
-
     except Exception as e:
         trace = traceback.format_exc(limit=4)
         print(f"Generation Error: {e}\n{trace}")
         session["state"] = "오류"
-        session["messages"].append({
-            "sender": "bot",
-            "html": f"<strong>오류 발생:</strong><br><pre>{e}</pre>"
-        })
+        session["messages"].append({"sender": "bot", "html": f"<strong>오류 발생:</strong><br><pre>{e}</pre>"})
         return _json({"ok": False, "error": str(e)}, 500)
 
 @app.get("/reset_chat")
@@ -625,7 +543,7 @@ def reset_chat():
 def go_back():
     _init_session_if_needed()
     current_state = session.get("state")
-    state_flow = {"점수": {"prev": "지역"}, "테마": {"prev": "점수"}, "기간": {"prev": "테마"}, "이동수단": {"prev": "기간"}, "실행중": {"prev": "이동수단"}, "완료": {"prev": "이동수단"}, "오류": {"prev": "이동수단"},}
+    state_flow = {"점수": {"prev": "지역"},"테마": {"prev": "점수"},"기간": {"prev": "테마"},"이동수단": {"prev": "기간"},"실행중": {"prev": "이동수단"},"완료": {"prev": "이동수단"},"오류": {"prev": "이동수단"},}
     if current_state in state_flow:
         messages = session.get("messages", [])
         if len(messages) >= 2:
@@ -651,65 +569,43 @@ def api_filter_options():
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
-# app.py - upload_image() 내부 교체/추가
-
 @app.post("/api/upload-image")
 def upload_image():
     title = request.form.get('title')
     addr1 = request.form.get('addr1')
     if 'file' not in request.files or not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
-
     file = request.files['file']
     if file.filename == '' or not _allowed_file(file.filename):
         return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
-
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-
-    # ✅ 세션당 1장 제한
     uploaded_once_keys = set(session.get("uploaded_once_keys", []))
     if key in uploaded_once_keys:
         return _json({"ok": False, "error": "이미 이 장소에 사진을 올리셨어요. 사용자당 1장만 가능합니다."}, 400)
-
     uploads = _load_user_uploads()
     current_images = uploads.get(key, [])
-
-    # 업로드 전 현재 합성 결과(업로드 포함) 확인하여 최대 4장 제한
-    all_images_before_upload = _get_all_images_for_place(
-        title, addr1, include_user_uploads=True, auto_fetch_if_needed=True
-    )
+    all_images_before_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=True)
     if len(all_images_before_upload) >= 4:
         return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
-
     ext = file.filename.rsplit('.', 1)[1].lower()
     filename = secure_filename(f"{uuid.uuid4()}.{ext}")
     file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-
     current_images.append(filename)
     uploads[key] = current_images
     _save_user_uploads(uploads)
-
-    # ✅ 이번 세션에선 더 못 올리도록 표시
     uploaded_once_keys.add(key)
     session["uploaded_once_keys"] = list(uploaded_once_keys)
-
-    all_images_after_upload = _get_all_images_for_place(
-        title, addr1, include_user_uploads=True, auto_fetch_if_needed=True
-    )
+    all_images_after_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=True)
     return _json({"ok": True, "images": all_images_after_upload})
 
 @app.get("/api/places")
 def api_places():
     try:
         df = _load_places_df()
-
-        # 1. 필터 파라미터 가져오기
         sido = request.args.get("sido")
         cat1 = request.args.get("cat1")
         cat3 = request.args.get("cat3")
         query = request.args.get("q")
-
-        # 2. 필터링 적용
         filtered_df = df.copy()
         if sido and sido != 'all':
             sido_val = sido
@@ -717,48 +613,37 @@ def api_places():
             elif '제주' in sido_val: sido_prefix = '제주'
             else: sido_prefix = sido_val
             filtered_df = filtered_df[filtered_df['addr1'].str.startswith(sido_prefix, na=False)]
-
         if cat1 and cat1 != 'all':
             filtered_df = filtered_df[filtered_df['cat1'] == cat1]
-
         if cat3 and cat3 != 'all':
             filtered_df = filtered_df[filtered_df['cat3'].str.contains(cat3, na=False)]
-
         if query:
             query_nfc = _nfc(query).lower()
             filtered_df = filtered_df[filtered_df['title'].str.lower().str.contains(query_nfc, na=False)]
 
-        # 3. 정렬 적용
         sort = request.args.get("sort", "review")
-        order = request.args.get("order", "desc") # <-- [추가] 정렬 순서 파라미터 받기
-        
+        order = request.args.get("order", "desc")
         score_col, score_label = _sort_key_from_param(sort)
-        sort_ascending = (order == 'asc') # 'asc'일 때만 True (오름차순)
-
+        sort_ascending = (order == 'asc')
         df_sorted = filtered_df.sort_values(
-            by=[score_col], 
-            ascending=sort_ascending, # <-- [수정] 변수를 사용해 동적으로 변경
+            by=[score_col],
+            ascending=sort_ascending,
             na_position="last"
         ).reset_index(drop=True)
         
-        # 4. 페이지네이션 적용
         page = max(1, int(request.args.get("page", 1)))
         per_page = max(1, min(100, int(request.args.get("per_page", 40))))
-
         total = len(df_sorted)
         total_pages = max(1, math.ceil(total / per_page))
         page = min(page, total_pages)
         start, end = (page - 1) * per_page, page * per_page
-
         view = df_sorted.iloc[start:end].copy()
         view["rank"] = range(start + 1, start + 1 + len(view))
 
-        # 5. 최종 결과 처리 (이미지 추가 등)
         def process_view_to_items(view_df: pd.DataFrame) -> List[Dict]:
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                # 홈 그리드: 업로드 제외, firstimage → JSON 우선순위, 필요 시 라이브 페치 자동
                 all_images = _get_all_images_for_place(
                     title, addr1, max_n=4, include_user_uploads=False, auto_fetch_if_needed=True
                 )
@@ -781,17 +666,13 @@ def api_places():
         traceback.print_exc()
         return _json({"ok": False, "error": str(e)}, 500)
 
-# 단건 장소용 이미지/좌표 API (인덱스 타임라인에서 사용)
 @app.get("/api/place-media")
 def api_place_media():
     title = _nfc(request.args.get("title", ""))
     addr1 = _nfc(request.args.get("addr1", ""))
     if not title or not addr1:
         return _json({"ok": False, "error": "title and addr1 are required."}, 400)
-
-    images = _get_all_images_for_place(
-        title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
-    )
+    images = _get_all_images_for_place(title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
     coords = _kakao_geocode_coords(title, addr1)
     payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords:
@@ -804,7 +685,6 @@ def api_geocode():
     addr = (request.args.get("addr") or "").strip()
     if not title and not addr:
         return _json({"ok": False, "error": "Query parameter 'title' or 'addr' is required."}, 400)
-
     coords = _kakao_geocode_coords(title or addr, addr1=addr)
     if not coords:
         return _json({"ok": False, "error": "Geocoding failed. Location not found."})
@@ -815,22 +695,16 @@ def api_nearest_transit():
     addr = (request.args.get("addr") or "").strip()
     if not addr:
         return _json({"ok": False, "error": "Query parameter 'addr' is required."}, 400)
-
     coords = _kakao_geocode_coords(addr, addr1=addr)
     if not coords:
         return _json({"ok": False, "error": f"Geocoding failed for address: {addr}"})
-
     lat, lon = coords
-
     subway_station, subway_line = _nearest_subway(lat, lon)
     bus_station = _nearest_bus(lat, lon)
-
     return _json({
         "ok": True,
         "result": {
-            "addr": addr,
-            "lat": lat,
-            "lon": lon,
+            "addr": addr, "lat": lat, "lon": lon,
             "subway_station": subway_station,
             "subway_line": subway_line,
             "bus_station": bus_station,
@@ -855,16 +729,8 @@ def img_proxy():
         return abort(502)
 
 if __name__ == "__main__":
-    try:
-        from tqdm import tqdm
-    except ImportError:
-        print("="*50)
-        print("캐싱 스크립트를 실행하려면 'tqdm' 라이브러리가 필요합니다.")
-        print("터미널에서 아래 명령어를 실행하여 설치해주세요.")
-        print("pip install tqdm")
-        print("="*50)
-
-    initialize_image_cache()
+    # [삭제] 서버 시작 시 더 이상 전체 이미지 캐싱을 실행하지 않음
+    # initialize_image_cache() 
+    
     start_self_pinging()
-
     app.run(host="0.0.0.0", port=5000, debug=True)
