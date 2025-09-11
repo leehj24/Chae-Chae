@@ -225,21 +225,39 @@ def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     return []
 def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     key = f"{_nfc(title)}|{_nfc(addr1)}"; query = " ".join([title, *_addr_region_tokens(addr1)]); urls = _kakao_image_search(query, size=4); cache = _load_image_cache(); cache[key] = {"q": query, "urls": urls, "ts": int(datetime.now().timestamp())}; _save_image_cache(); return urls
-def _get_all_images_for_place(title: str, addr1: str, max_n: int = 4, include_user_uploads: bool = False, auto_fetch_if_needed: bool = False) -> List[str]:
-    key = f"{_nfc(title)}|{_nfc(addr1)}"; df = _load_places_df(); csv_imgs: list[str] = []; match = df[(df['title'].apply(_nfc) == _nfc(title)) & (df['addr1'].apply(_nfc) == _nfc(addr1))]
-    if not match.empty:
-        u = str(match.iloc[0].get('firstimage') or '').strip()
-        if u and isinstance(u, str) and u.lower().startswith('http'): csv_imgs.append(u)
+# app.py
+
+def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None, max_n: int = 4, include_user_uploads: bool = False, auto_fetch_if_needed: bool = False) -> List[str]:
+    key = f"{_nfc(title)}|{_nfc(addr1)}"
+    
+    # 전체 데이터 파일을 다시 로드하는 부분을 삭제했습니다.
+    # 대신, 전달받은 이미지 URL을 직접 사용합니다.
+    csv_imgs: list[str] = []
+    u = str(firstimage_url or '').strip()
+    if u and u.lower().startswith('http'):
+        csv_imgs.append(u)
+
     kakao_imgs = _images_for_place(title, addr1, max_n=4)
-    if not kakao_imgs and auto_fetch_if_needed: kakao_imgs = _fetch_and_cache_images_live(title, addr1)
+    if not kakao_imgs and auto_fetch_if_needed:
+        kakao_imgs = _fetch_and_cache_images_live(title, addr1)
+    
     user_imgs: list[str] = []
     if include_user_uploads:
-        uploads_db = _load_user_uploads(); user_uploads = uploads_db.get(key, [])
+        uploads_db = _load_user_uploads()
+        user_uploads = uploads_db.get(key, [])
         user_imgs = [url_for('uploaded_file', filename=f) if not str(f).startswith('http') else str(f) for f in user_uploads]
+        
     ordered: list[str] = []
-    if csv_imgs: ordered.append(csv_imgs[0])
-    ordered.extend(kakao_imgs); ordered.extend(user_imgs)
-    ordered = [u for u in ordered if isinstance(u, str) and u.strip()]; ordered = list(dict.fromkeys(ordered))[:max_n]; return ordered
+    if csv_imgs:
+        ordered.append(csv_imgs[0])
+    
+    ordered.extend(kakao_imgs)
+    ordered.extend(user_imgs)
+    
+    ordered = [u for u in ordered if isinstance(u, str) and u.strip()]
+    ordered = list(dict.fromkeys(ordered))[:max_n]
+    return ordered
+
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
     if not KAKAO_API_KEY: return None
     _ensure_session()
@@ -400,8 +418,13 @@ def api_places():
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
+                
+                # 이미 가지고 있는 데이터(r)에서 이미지 URL을 가져옵니다.
+                firstimage_url = r.get("firstimage")
+                
+                # 수정한 함수에 이 URL을 전달합니다.
                 all_images = _get_all_images_for_place(
-                    title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
+                    title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
                 )
                 items_list.append({
                     "rank": int(r.get("rank", 0)), "title": title, "addr1": addr1,
