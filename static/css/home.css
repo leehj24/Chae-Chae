@@ -689,6 +689,13 @@ main{ padding-bottom:40px }
   background: var(--panel);
 }
 
+/* ▼▼▼ 아래 코드 추가 ▼▼▼ */
+.review-modal-toolbar .primary-btn {
+  white-space: nowrap; /* 버튼 텍스트 줄바꿈 방지 */
+}
+/* ▲▲▲ 여기까지 추가 ▲▲▲ */
+
+
 .review-modal-body {
   flex-grow: 1;
   overflow-y: auto;
