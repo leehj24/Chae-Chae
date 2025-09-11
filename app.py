@@ -651,6 +651,8 @@ def api_filter_options():
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
+# app.py - upload_image() 내부 교체/추가
+
 @app.post("/api/upload-image")
 def upload_image():
     title = request.form.get('title')
@@ -663,6 +665,12 @@ def upload_image():
         return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
 
     key = f"{_nfc(title)}|{_nfc(addr1)}"
+
+    # ✅ 세션당 1장 제한
+    uploaded_once_keys = set(session.get("uploaded_once_keys", []))
+    if key in uploaded_once_keys:
+        return _json({"ok": False, "error": "이미 이 장소에 사진을 올리셨어요. 사용자당 1장만 가능합니다."}, 400)
+
     uploads = _load_user_uploads()
     current_images = uploads.get(key, [])
 
@@ -680,6 +688,10 @@ def upload_image():
     current_images.append(filename)
     uploads[key] = current_images
     _save_user_uploads(uploads)
+
+    # ✅ 이번 세션에선 더 못 올리도록 표시
+    uploaded_once_keys.add(key)
+    session["uploaded_once_keys"] = list(uploaded_once_keys)
 
     all_images_after_upload = _get_all_images_for_place(
         title, addr1, include_user_uploads=True, auto_fetch_if_needed=True

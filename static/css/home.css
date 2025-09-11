@@ -1,4 +1,4 @@
-/* static/css/home.css — Home(랜딩) 전용 스타일 */
+/* static/css/home.css — Home(랜딩) 전용 스타일 (전체) */
 
 /* ─────────────────────────────────────────────
    Theme (Light)
@@ -257,24 +257,39 @@ main{ padding-bottom:40px }
 }
 
 /* ─────────────────────────────────────────────
-   Carousel (홈 카드용)
+   Carousel (홈 카드용)  ✅ 교체
    ───────────────────────────────────────────── */
 .carousel{
-  position:relative; aspect-ratio: 16/9;
-  background:#f0f4ff; border-bottom:1px solid var(--border);
+  position:relative;
+  aspect-ratio: 16/9;
+  background:#f0f4ff;
+  border-bottom:1px solid var(--border);
   overflow:hidden;
 }
+
 .slides{
-  height:100%; display:flex; align-items:center;
+  height:100%;
+  display:flex;
+  align-items:stretch;           /* ⬅ center → stretch */
   transition:transform .32s ease;
 }
-.slides img,
-.slide-img{
-  width:100%; height:100%; object-fit:cover; flex:0 0 100%;
-  user-select:none; -webkit-user-drag:none;
+
+/* "각 슬라이드"가 프레임을 100% 차지하도록 */
+.carousel-slide{
+  flex:0 0 100%;                 /* ⬅ 핵심 */
+  height:100%;
 }
 
-/* 좌우 네비게이션 버튼 — 여러 장일 때만 나타남 */
+/* 이미지는 슬라이드 꽉 채우기 */
+.carousel-slide img,
+.slides img{
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+/* 좌우 네비 버튼 */
 .cbtn{
   position:absolute; top:50%; transform:translateY(-50%);
   width:32px; height:32px; border-radius:50%;
@@ -287,6 +302,10 @@ main{ padding-bottom:40px }
 .cbtn.prev{ left:8px }
 .cbtn.next{ right:8px }
 .cbtn[hidden]{ display:none !important; }
+.cbtn:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(59,130,246,.25), 0 2px 8px rgba(0,0,0,.12);
+}
 
 /* 터치/모바일에서는 항상 표시 */
 @media (hover: none), (pointer: coarse) {
@@ -300,6 +319,7 @@ main{ padding-bottom:40px }
   background:repeating-linear-gradient(135deg, #f7faff 0 16px, #eef4ff 16px 32px);
   letter-spacing:.06em;
 }
+
 
 /* Meta */
 .meta{ padding:12px }
@@ -347,3 +367,46 @@ main{ padding-bottom:40px }
   grid-column: 1 / -1;
 }
 .error{ border-style:solid; border-color:#ef9a9a; color:#b71c1c }
+
+/* ─────────────────────────────────────────────
+   Image Uploader (캐러셀 내부 슬라이드)
+   ───────────────────────────────────────────── */
+.image-uploader {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background-color: var(--panel-2);
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform .15s ease;
+  text-align: center;
+  height: 100%;
+}
+.image-uploader:hover { background-color: var(--chip-bg); border-color: var(--brand); }
+.uploader-slide { display:flex; align-items:center; justify-content:center; padding: 12px; background: var(--panel-2); }
+.uploader-label {
+  cursor: pointer; display:grid; place-items:center; gap:6px;
+  padding: 14px 16px; border-radius: 12px; user-select: none;
+  color: var(--brand); font-weight: 800; line-height: 1.15;
+}
+.uploader-label:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+  background: #eef4ff;
+}
+.uploader-input { width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1; }
+.up-ic{ font-size: 24px; line-height: 1; }
+.up-title{ font-size: 0.95rem; color: #0f172a; }
+.up-hint{ font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+
+/* ─────────────────────────────────────────────
+   (Optional) Legacy media-carousel Block
+   ───────────────────────────────────────────── */
+.media-carousel {
+  position: relative;
+  width: 280px; max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; background: #fff;
+}
+.media-carousel .frame { aspect-ratio: 4 / 3; display: grid; place-items: center; }
+.media-carousel img { max-width: 100%; max-height: 100%; }
+.media-carousel .noimage { height: 100%; }
