@@ -157,12 +157,11 @@ main{ padding-bottom:40px }
 .explore-head{ margin-bottom:12px; }
 .section-title{ font-size:20px; margin:0 0 4px 0; color:#0b162a }
 
-/* Toolbar */
+
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column; /* 툴바를 세로로 배치 */
   gap: 16px;
-  align-items: flex-end;
   padding: 16px;
   border-radius: var(--radius-lg);
   background-color: var(--panel);
@@ -171,51 +170,83 @@ main{ padding-bottom:40px }
   margin-top: 12px;
   margin-bottom: 12px;
 }
+
+.filter-options-group, .sort-options-group {
+  display: flex;
+  flex-wrap: wrap; /* 화면이 작아지면 줄바꿈 */
+  gap: 16px;
+  align-items: flex-end; /* 모든 아이템의 하단이 정렬되도록 */
+  width: 100%;
+}
+
+.sort-options-group {
+  justify-content: flex-start; /* 정렬 옵션은 왼쪽부터 시작 */
+  gap: 8px; /* 정렬 드롭다운 사이의 간격을 좁게 */
+}
+
 .filter-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 180px;
+  min-width: 150px;
+  flex: 1 1 150px; /* 유연하게 너비 조절 */
 }
+
 .filter-group label {
   font-weight: 700;
   padding-left: 4px;
   color: var(--muted);
   font-size: 0.9rem;
+  white-space: nowrap;
 }
-.filter-select, .filter-search {
+
+/* 모든 입력창(select, input, button)에 공통 스타일 적용 */
+.filter-select, .filter-search, .sort-trigger {
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background-color: var(--panel-2);
   font-size: 1rem;
   width: 100%;
-}
-.filter-group.search-group {
-  flex-grow: 1;
-  min-width: 250px;
-}
-.filter-group.sort-group .sort-dropdown { width: 100%; }
-.filter-group.sort-group .sort-trigger {
-  width: 100%;
-  justify-content: space-between;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
 }
 
-.sort-dropdown{ position:relative }
-.sort-trigger{
-  all:unset; cursor:pointer; display:flex; align-items:center; gap:10px;
-  padding:10px 14px; border-radius:12px;
-  border:1px solid var(--border);
-  background: var(--panel-2);
-  color:#0f172a;
+.filter-group.search-group {
+  flex: 2 1 250px; /* 검색창은 다른 필터보다 넓게 */
 }
-.sort-trigger .label{ font-weight:700 }
-.sort-trigger .chev{ transform:translateY(1px) }
+
+.sort-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+/* sort-trigger에만 필요한 추가 스타일 */
+.sort-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  gap: 10px;
+}
+
+.sort-trigger .label { font-weight: 700; }
+.sort-trigger .chev { transform: translateY(1px); }
+
+/* 호버 및 포커스 효과 */
 .sort-dropdown.open .sort-trigger,
-.sort-trigger:hover{
-  border-color:#cdd7ee;
-  box-shadow:0 0 0 3px rgba(59,130,246,.12);
+.sort-trigger:hover,
+.filter-select:hover,
+.filter-search:focus {
+  border-color: #cdd7ee;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .12);
+  outline: none;
 }
+
+
 .sort-menu{
   position:absolute; top:calc(100% + 8px); left:0; right: 0; min-width: 100%;
   background:linear-gradient(180deg,#ffffff,#f7faff);
@@ -255,9 +286,13 @@ main{ padding-bottom:40px }
   border:1px solid #cfe0ff; border-radius:999px;
   padding:6px 10px; box-shadow:0 6px 16px rgba(15,23,42,.08);
 }
+.place-card .badge.score-badge {
+  font-feature-settings: 'tnum';
+  letter-spacing: .01em;
+}
 
 /* ─────────────────────────────────────────────
-   Carousel (홈 카드용)  ✅ 교체
+   Carousel (홈 카드용)
    ───────────────────────────────────────────── */
 .carousel{
   position:relative;
@@ -266,21 +301,16 @@ main{ padding-bottom:40px }
   border-bottom:1px solid var(--border);
   overflow:hidden;
 }
-
 .slides{
   height:100%;
   display:flex;
-  align-items:stretch;           /* ⬅ center → stretch */
+  align-items:stretch;
   transition:transform .32s ease;
 }
-
-/* "각 슬라이드"가 프레임을 100% 차지하도록 */
 .carousel-slide{
-  flex:0 0 100%;                 /* ⬅ 핵심 */
+  flex:0 0 100%;
   height:100%;
 }
-
-/* 이미지는 슬라이드 꽉 채우기 */
 .carousel-slide img,
 .slides img{
   display:block;
@@ -288,8 +318,6 @@ main{ padding-bottom:40px }
   height:100%;
   object-fit:cover;
 }
-
-/* 좌우 네비 버튼 */
 .cbtn{
   position:absolute; top:50%; transform:translateY(-50%);
   width:32px; height:32px; border-radius:50%;
@@ -306,13 +334,9 @@ main{ padding-bottom:40px }
   outline:none;
   box-shadow:0 0 0 3px rgba(59,130,246,.25), 0 2px 8px rgba(0,0,0,.12);
 }
-
-/* 터치/모바일에서는 항상 표시 */
 @media (hover: none), (pointer: coarse) {
   .cbtn { opacity: 1; }
 }
-
-/* 이미지 없음 상태 */
 .noimage{
   position:absolute; inset:0; display:grid; place-items:center;
   color:#475569; font-weight:800;
@@ -334,30 +358,66 @@ main{ padding-bottom:40px }
   background:var(--chip-bg); color:#0f172a;
 }
 
-/* ─────────────────────────────────────────────
-   Pagination
-   ───────────────────────────────────────────── */
-.pagination{ display:flex; align-items:center; justify-content:center; gap:8px; margin:14px 0 0; }
-.page-btn{
-  all:unset; cursor:pointer; width:36px; height:36px; border-radius:10px;
-  display:grid; place-items:center;
-  border:1px solid var(--border);
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
-  color:#0f172a;
-}
-.page-btn:hover{ transform:translateY(-1px); border-color:#cdd7ee }
-.page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.page-list{ list-style:none; margin:0; padding:0; display:flex; gap:6px; flex-wrap:wrap; max-width:min(720px, 90vw); }
-.page-list li{ display:flex }
-.page-list button{
-  all:unset; cursor:pointer; min-width:36px; height:36px; padding:0 10px;
-  display:inline-grid; place-items:center;
-  border:1px solid var(--border);
-  background:linear-gradient(180deg,#ffffff,#f6f9ff);
-  border-radius:10px; font-weight:700; color:#0f172a;
+/* ▼▼▼ [수정된 부분] Pagination 스타일 ▼▼▼ */
+.pagination{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap: 8px; /* 버튼 사이 간격 */
+  margin: 24px 0 0;
 }
-.page-list button[aria-current="page"]{ border-color:#cfe0ff; background:linear-gradient(180deg,#f2f7ff,#e7f0ff); }
+
+/* 페이지네이션 내 모든 버튼 공통 스타일 */
+.pagination button {
+  all:unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  background-color: var(--panel);
+  border: 1px solid var(--border);
+  transition: all 0.2s ease-out;
+}
+
+.pagination button:not(:disabled):hover {
+  border-color: #d0daee;
+  background-color: var(--panel-2);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 현재 페이지 버튼 (활성 상태) */
+.page-list button[aria-current="page"] {
+  background-color: var(--brand);
+  color: white;
+  border-color: var(--brand);
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.25);
+}
+
+.page-list{
+  list-style:none;
+  margin:0;
+  padding:0;
+  display:flex;
+  gap: 8px; /* 숫자 버튼 사이 간격 */
+  flex-wrap:wrap;
+}
+.page-list li{ display:flex; }
+/* ▲▲▲ [여기까지 수정] ▲▲▲ */
+
 
 /* States */
 .empty, .error{
@@ -397,16 +457,3 @@ main{ padding-bottom:40px }
 .up-ic{ font-size: 24px; line-height: 1; }
 .up-title{ font-size: 0.95rem; color: #0f172a; }
 .up-hint{ font-size: 0.8rem; color: var(--muted); font-weight: 600; }
-
-/* ─────────────────────────────────────────────
-   (Optional) Legacy media-carousel Block
-   ───────────────────────────────────────────── */
-.media-carousel {
-  position: relative;
-  width: 280px; max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px; overflow: hidden; background: #fff;
-}
-.media-carousel .frame { aspect-ratio: 4 / 3; display: grid; place-items: center; }
-.media-carousel img { max-width: 100%; max-height: 100%; }
-.media-carousel .noimage { height: 100%; }

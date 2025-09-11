@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}" />
 </head>
 <body>
-  <!-- 상단 바 -->
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ url_for('home') }}" aria-label="메인으로">
@@ -22,7 +21,6 @@
   </header>
 
   <main>
-    <!-- ===== Splash / Hero ===== -->
     <section class="splash">
       <div class="splash-inner">
         <div class="brand-hero" aria-label="브랜드">
@@ -34,7 +32,6 @@
           <p class="sub">당신만의 완벽한 여행 계획을 세워보세요</p>
         </div>
 
-        <!-- 큰 안내 카드 -->
         <section class="about-card" aria-labelledby="what-title">
           <h2 id="what-title">채채는 어떤 서비스인가요?</h2>
           <p class="lead">
@@ -107,56 +104,67 @@
       </div>
     </section>
 
-    <!-- ===== 전체 여행지(그리드/페이지네이션) ===== -->
     <section class="explore" data-api="{{ url_for('api_places') }}">
       <div class="explore-head">
         <h2 class="section-title">전체 여행지 둘러보기</h2>
         <p class="muted">다양한 여행지를 확인해보세요</p>
 
-        <!-- 🔧 필터 + 검색 + 정렬 툴바 -->
         <div class="toolbar">
-          <!-- 지역 -->
-          <div class="filter-group">
-            <label for="sido-filter">지역</label>
-            <select id="sido-filter" class="filter-select">
-              <option value="all">전체</option>
-            </select>
-          </div>
+          <div class="filter-options-group">
+            <div class="filter-group">
+              <label for="sido-filter">지역</label>
+              <select id="sido-filter" class="filter-select">
+                <option value="all">전체</option>
+              </select>
+            </div>
 
-          <!-- 대분류 -->
-          <div class="filter-group">
-            <label for="cat1-filter">테마</label>
-            <select id="cat1-filter" class="filter-select">
-              <option value="all">전체</option>
-            </select>
-          </div>
+            <div class="filter-group">
+              <label for="cat1-filter">테마</label>
+              <select id="cat1-filter" class="filter-select">
+                <option value="all">전체</option>
+              </select>
+            </div>
 
-          <!-- 소분류 -->
-          <div class="filter-group">
-            <label for="cat3-filter">상세테마</label>
-            <select id="cat3-filter" class="filter-select">
-              <option value="all">전체</option>
-            </select>
-          </div>
+            <div class="filter-group">
+              <label for="cat3-filter">상세테마</label>
+              <select id="cat3-filter" class="filter-select">
+                <option value="all">전체</option>
+              </select>
+            </div>
 
-          <!-- 검색 -->
-          <div class="filter-group search-group">
-            <label for="search-input">검색</label>
-            <input id="search-input" class="filter-search" type="search" placeholder="장소명 검색" />
+            <div class="filter-group search-group">
+              <label for="search-input">검색</label>
+              <input id="search-input" class="filter-search" type="search" placeholder="장소명 검색" />
+            </div>
           </div>
-
-          <!-- 정렬 -->
-          <div class="filter-group sort-group">
-            <label id="sortLabel">정렬</label>
-            <div id="sortDropdown" class="sort-dropdown" data-current="review" aria-labelledby="sortLabel">
-              <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
-                <span class="label">인기도 지수</span>
-                <span class="chev" aria-hidden="true">▾</span>
-              </button>
-              <ul class="sort-menu" role="listbox">
-                <li role="option" data-value="review" aria-selected="true">인기도 지수</li>
-                <li role="option" data-value="tour">관광 지수</li>
-              </ul>
+          
+          <div class="sort-options-group">
+            <div class="filter-group">
+              <label id="sortLabel">정렬</label>
+              <div id="sortDropdown" class="sort-dropdown" data-current="review" aria-labelledby="sortLabel">
+                <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="label">인기도 지수</span>
+                  <span class="chev" aria-hidden="true">▾</span>
+                </button>
+                <ul class="sort-menu" role="listbox">
+                  <li role="option" data-value="review" aria-selected="true">인기도 지수</li>
+                  <li role="option" data-value="tour">관광 지수</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div class="filter-group">
+              <label id="orderLabel">정렬 순서</label>
+              <div id="orderDropdown" class="sort-dropdown" data-current="desc" aria-labelledby="orderLabel">
+                <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="label">높은 순</span>
+                  <span class="chev" aria-hidden="true">▾</span>
+                </button>
+                <ul class="sort-menu" role="listbox">
+                  <li role="option" data-value="desc" aria-selected="true">높은 순</li>
+                  <li role="option" data-value="asc">낮은 순</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>

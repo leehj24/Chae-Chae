@@ -730,9 +730,17 @@ def api_places():
 
         # 3. 정렬 적용
         sort = request.args.get("sort", "review")
+        order = request.args.get("order", "desc") # <-- [추가] 정렬 순서 파라미터 받기
+        
         score_col, score_label = _sort_key_from_param(sort)
-        df_sorted = filtered_df.sort_values(by=[score_col], ascending=[False], na_position="last").reset_index(drop=True)
+        sort_ascending = (order == 'asc') # 'asc'일 때만 True (오름차순)
 
+        df_sorted = filtered_df.sort_values(
+            by=[score_col], 
+            ascending=sort_ascending, # <-- [수정] 변수를 사용해 동적으로 변경
+            na_position="last"
+        ).reset_index(drop=True)
+        
         # 4. 페이지네이션 적용
         page = max(1, int(request.args.get("page", 1)))
         per_page = max(1, min(100, int(request.args.get("per_page", 40))))
