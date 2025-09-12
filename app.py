@@ -56,7 +56,7 @@ sido_map = {
     '경남': '경상남도', '경상남도': '경상남도', '경북': '경상북도', '경상북도': '경상북도',
     '제주': '제주', '제주도': '제주', '제주특별자치도': '제주',
 }
-MAX_MSGS = 30
+MAX_MSGS = 15
 PATH_USER_REVIEWS = str(BASE_DIR / "_user_reviews.json")
 _USER_REVIEWS_CACHE = {"data": None, "mtime": None}
 _USER_REVIEWS_LOCK = threading.Lock()
