@@ -81,7 +81,13 @@ body{
 .chat-input:focus{ border-color:#cdd7ee; box-shadow:0 0 0 3px rgba(59,130,246,.12) }
 .button-wrap { display:flex; flex-wrap:wrap; gap:10px; justify-content: flex-start; }
 .button-wrap.wide { max-width: 600px; }
-.theme-btn { padding:10px 14px; font-weight:700; display:flex; align-items:center; gap:8px; box-shadow: 0 4px 12px rgba(15, 23, 42, .05); background: var(--panel); border:1px solid var(--border); cursor:pointer;}
+/* ▼▼▼ [수정] 이 부분에 border-radius 추가 ▼▼▼ */
+.theme-btn {
+  padding:10px 14px; font-weight:700; display:flex; align-items:center; gap:8px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, .05); background: var(--panel);
+  border:1px solid var(--border); cursor:pointer; border-radius: 12px;
+}
+/* ▲▲▲ [수정] ▲▲▲ */
 .theme-btn.selected { border-color:#cfe0ff; background:linear-gradient(180deg,#f2f7ff,#e7f0ff); }
 .theme-btn .icon { font-size:1.2rem; }
 .theme-actions{ margin-top:12px; display:flex; gap:8px; justify-content: flex-start; }
@@ -95,7 +101,7 @@ body{
 .range-actions{ display:flex; align-items:center; gap:10px; margin-top:10px; justify-content: flex-start; }
 .days-pill{ font-weight:700; padding:8px 12px; border-radius:999px; background:var(--chip-bg); }
 .spinner{ width:20px; height:20px; border:3px solid rgba(15,23,42,.12); border-top-color:var(--brand); border-radius:50%; animation:spin 1s linear infinite; display:inline-block; vertical-align: middle; margin-right: 8px;}
-@keyframes spin{ to{transform:rotate(360deg)} }
+@keyframes spin{ to{transform:rotate(306deg)} }
 .spinner.small { width: 28px; height: 28px; border-width: 4px; margin: 0; }
 
 /* ───────── Unified Chip Style ───────── */
