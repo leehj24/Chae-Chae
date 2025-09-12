@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채 – 여행 추천 챗봇</title>
   <meta name="color-scheme" content="dark light" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}?v=3" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}?v=4" />
 </head>
 <body>
   <header class="topbar">
@@ -49,7 +49,6 @@
                   <p>해당 지역에 대한 네이버 블로그 감성 텍스트와 리뷰 수를 종합한 점수</p>
                 </div>
               </article>
-
               <article class="feature">
                 <span class="ic tour" aria-hidden="true">🧭</span>
                 <div class="meta">
@@ -58,7 +57,6 @@
                 </div>
               </article>
             </div>
-
             <div class="fcol">
               <article class="feature">
                 <span class="ic cal" aria-hidden="true">📅</span>
@@ -67,7 +65,6 @@
                   <p>1~100일 사이의 여행 일정 계획 가능</p>
                 </div>
               </article>
-
               <article class="feature">
                 <span class="ic transit" aria-hidden="true">🚶</span>
                 <div class="meta">
@@ -117,21 +114,18 @@
                 <option value="all">전체</option>
               </select>
             </div>
-
             <div class="filter-group">
               <label for="cat1-filter">테마</label>
               <select id="cat1-filter" class="filter-select">
                 <option value="all">전체</option>
               </select>
             </div>
-
             <div class="filter-group">
               <label for="cat3-filter">상세테마</label>
               <select id="cat3-filter" class="filter-select">
                 <option value="all">전체</option>
               </select>
             </div>
-
             <div class="filter-group search-group">
               <label for="search-input">검색</label>
               <input id="search-input" class="filter-search" type="search" placeholder="장소명 검색" />
@@ -152,7 +146,6 @@
                 </ul>
               </div>
             </div>
-            
             <div class="filter-group">
               <label id="orderLabel">정렬 순서</label>
               <div id="orderDropdown" class="sort-dropdown" data-current="desc" aria-labelledby="orderLabel">
@@ -198,7 +191,6 @@
             <span class="star" data-value="4">★</span>
             <span class="star" data-value="5">★</span>
           </div>
-          <input type="hidden" name="rating" id="ratingInput" value="0">
         </form>
       </div>
       <footer class="modal-actions">
@@ -217,12 +209,10 @@
             </div>
             <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
         </header>
-        
         <div class="review-content-container">
             <div id="reviewIframeContainer" class="review-container hidden">
                 <iframe id="reviewIframe" src="about:blank" frameborder="0"></iframe>
             </div>
-
             <div id="customReviewContainer" class="review-container hidden">
                 <div class="review-modal-toolbar">
                     <div class="sort-dropdown" id="reviewSortDropdown" data-current="newest">
@@ -237,8 +227,7 @@
                     </div>
                     <button type="button" id="openWriteReviewBtn" class="primary-btn small">후기 작성</button>
                 </div>
-                <div id="reviewList" class="review-modal-body">
-                </div>
+                <div id="reviewList" class="review-modal-body"></div>
             </div>
         </div>
     </div>
@@ -263,8 +252,7 @@
     </div>
   </div>
 
-
-  <script src="{{ url_for('static', filename='js/home.js') }}?v=10"></script>
+  <script src="{{ url_for('static', filename='js/home.js') }}?v=11"></script>
 
   <noscript>
     <div style="max-width:1100px;margin:24px auto;padding:12px;border:1px solid #ccc;border-radius:12px">
