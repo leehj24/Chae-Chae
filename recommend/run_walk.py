@@ -11,18 +11,6 @@ import unicodedata as ud
 
 # ⚠️ PATH_TMF, KAKAO_API_KEY 는 config에서만 관리
 from recommend.config import *
-from dotenv import load_dotenv
-load_dotenv()
-import os
-
-# 환경변수 있으면 우선, 없으면 config 값 유지
-_KAKAO_ENV = os.environ.get("KAKAO_API_KEY")
-if _KAKAO_ENV:
-    KAKAO_API_KEY = _KAKAO_ENV  # noqa: F405  (config의 것을 덮되, env 없으면 그대로)
-
-_ODSAY_ENV = os.environ.get("ODSAY_API_KEY")
-if _ODSAY_ENV:
-    ODSAY_API_KEY = _ODSAY_ENV  # noqa: F405
 
 # ------------------------
 # Public API

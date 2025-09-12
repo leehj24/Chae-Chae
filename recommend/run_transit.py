@@ -14,20 +14,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ⚠️ 모든 경로/API 키는 config에서만!
 from recommend.config import * # noqa: F403,F401
 
-from dotenv import load_dotenv
-load_dotenv()
-import os
-
-# 환경변수 있으면 우선, 없으면 config 값 유지
-_KAKAO_ENV = os.environ.get("KAKAO_API_KEY")
-if _KAKAO_ENV:
-    KAKAO_API_KEY = _KAKAO_ENV
-
-_ODSAY_ENV = os.environ.get("ODSAY_API_KEY")
-if _ODSAY_ENV:
-    ODSAY_API_KEY = _ODSAY_ENV
-
-
 # ========================
 # Public API
 # ========================
