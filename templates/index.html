@@ -64,8 +64,15 @@
                             <div class="addr">{{ r.addr1 }}</div>
                             <div class="tags">
                               {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
-                              {% if r.cat3 %}<span class="chip ghost">{{ r.cat3 }}</span>{% endif %}
-                            </div>
+                              
+                              {% if r.cat3 %}
+                                {% for tag in r.cat3.replace('/',',').replace('|',',').split(',')|map('trim')|list %}
+                                  {% if tag and loop.index <= 2 %}
+                                    <span class="chip ghost">{{ tag }}</span>
+                                  {% endif %}
+                                {% endfor %}
+                              {% endif %}
+                              </div>
                             <div class="card-actions">
                               <div class="star-rating-display" role="button" tabindex="0">
                                 <div class="stars-outer"><div class="stars-inner"></div></div>

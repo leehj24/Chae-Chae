@@ -145,13 +145,16 @@ def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
 
     print("✅ CSV 로드 완료. 이제 데이터 타입을 최적화합니다...")
     
+    # 주소에서 시도(sido) 정보 추출 후 category 타입으로 변환
+    df['sido'] = df['addr1'].astype(str).str.split().str[0].astype('category')
+    
     for col in df.columns:
         if 'score' in col or col in ['mapx', 'mapy']:
             df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
         elif df[col].dtype == 'object':
             df[col] = df[col].fillna("").astype(str)
             # 유니크한 값이 적은 컬럼을 'category'로 변환
-            if col in ['cat1']: # 시도(sido)는 주소(addr1)에서 추출하므로 addr1만 변환
+            if col in ['cat1']:
                 num_unique_values = df[col].nunique()
                 if num_unique_values / len(df) < 0.5:
                     df[col] = df[col].astype('category')
@@ -159,11 +162,8 @@ def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     print("✅ 데이터 타입 최적화 완료!")
     df.info(memory_usage='deep')
     
-    # 주소에서 시도(sido) 정보 추출
-    df['sido'] = df['addr1'].astype(str).str.split().str[0]
-    
-    sidos = sorted([s for s in df['sido'].unique() if s])
-    cat1s = sorted([c for c in df['cat1'].astype(str).unique() if c])
+    sidos = sorted([s for s in df['sido'].cat.categories if s])
+    cat1s = sorted([c for c in df['cat1'].cat.categories if c])
     
     all_cat3s = set()
     df['cat3'].astype(str).str.split(r'[,/|]').dropna().apply(
@@ -390,7 +390,6 @@ def home():
 @app.get("/chat")
 def index():
     _init_session_if_needed()
-    # 아래와 같이 kakao_js_key가 전달되는지 확인!
     return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
 
 @app.post("/chat")
@@ -493,7 +492,8 @@ def api_places():
     try:
         sido = request.args.get("sido"); cat1 = request.args.get("cat1"); cat3 = request.args.get("cat3"); query = request.args.get("q")
         
-        filtered_df = PLACES_DF.copy()
+        # [수정] .copy()를 제거하여 불필요한 메모리 복사를 방지합니다.
+        filtered_df = PLACES_DF
         
         if sido and sido != 'all':
             filtered_df = filtered_df[filtered_df['sido'] == sido]
@@ -519,7 +519,6 @@ def api_places():
             "rank", "title", "addr1", "cat1", "cat3", "firstimage",
             "tour_score", "review_score", "mapx", "mapy"
         ]
-        # 일부 컬럼이 없을 수도 있으므로, 존재하는 컬럼만 선택
         existing_cols = [c for c in cols_to_return if c in view.columns]
         items_list = _df_to_records(view[existing_cols])
 
@@ -535,15 +534,20 @@ def api_places():
 @app.get("/api/place-media")
 def api_place_media():
     """
-    [수정] 특정 장소의 모든 이미지(CSV, Kakao, 사용자 업로드)를 가져오는 전용 API.
-    프론트엔드에서 카드가 화면에 보일 때 이 API를 호출합니다.
+    [추가] 특정 장소의 모든 이미지(CSV, Kakao, 사용자 업로드)를 가져오는 전용 API.
+    프론트엔드에서 카드가 화면에 보일 때 이 API를 호출하여 이미지를 지연 로딩합니다.
     """
     title = _nfc(request.args.get("title", "")); addr1 = _nfc(request.args.get("addr1", ""))
     if not title or not addr1: return _json({"ok": False, "error": "title and addr1 are required."}, 400)
     
-    place_rows = PLACES_DF[(PLACES_DF['title'] == title) & (PLACES_DF['addr1'] == addr1)]
+    # DataFrame에서 해당 장소를 찾아 'firstimage' URL을 가져옵니다.
+    # astype('object')를 사용하여 category 타입 비교 경고를 피합니다.
+    place_mask = (PLACES_DF['title'].astype('object') == title) & (PLACES_DF['addr1'].astype('object') == addr1)
+    place_rows = PLACES_DF[place_mask]
+
     firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else None
 
+    # 모든 이미지 소스를 결합하여 반환합니다. Kakao 이미지가 없으면 실시간으로 가져옵니다.
     images = _get_all_images_for_place(title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
     coords = _kakao_geocode_coords(title, addr1)
     
@@ -642,6 +646,5 @@ def img_proxy():
 
 if __name__ == "__main__":
     start_self_pinging()
-
     # 디버그 모드는 메모리를 더 많이 사용하므로 운영 환경에서는 False로 설정하는 것이 좋습니다.
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)

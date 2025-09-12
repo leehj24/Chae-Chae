@@ -46,7 +46,7 @@
   let currentReviewTarget = null;
   let currentReviews = [];
   
-  let observer; // 지연 로딩을 위한 IntersectionObserver 인스턴스
+  let observer; // [추가] 지연 로딩을 위한 IntersectionObserver 인스턴스
 
   // --- 이미지 에러 핸들러 및 캐러셀 상태 업데이트 함수 ---
   window.handleHomeCardImgError = function(e){
@@ -204,45 +204,64 @@
       }
   }
 
-  // --- 카드 HTML 생성 함수 ---
-  function cardHTML(item) {
-    const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy, firstimage } = item;
-    let score = state.sort === 'review' ? review_score : tour_score;
-    if (score !== null && typeof score !== 'undefined') { score *= 100; }
-    const scoreBadgeHTML = (score !== null && typeof score !== 'undefined')
-      ? `<div class="badge score-badge">${score.toFixed(2)}</div>` : '';
-      
-    const placeholderStyle = firstimage ? `style="background-image: url('/img-proxy?u=${encodeURIComponent(firstimage)}');"` : '';
+// ▼▼▼ [수정] 이 함수 전체를 아래 코드로 교체해주세요 ▼▼▼
+function cardHTML(item) {
+  const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy, firstimage } = item;
+  let score = state.sort === 'review' ? review_score : tour_score;
+  if (score !== null && typeof score !== 'undefined') { score *= 100; }
+  
+  const scoreBadgeHTML = (score !== null && typeof score !== 'undefined')
+    ? `<div class="badge score-badge">${score.toFixed(2)}</div>` : '';
     
-    return `
-      <article class="place-card" data-title="${title}" data-addr1="${addr1}" data-mapx="${mapx}" data-mapy="${mapy}" data-loaded="false">
-        <div class="rank">#${rank}</div>
-        ${scoreBadgeHTML}
-        <div class="carousel" aria-label="${title} 이미지 프레임">
-          <div class="media-placeholder" ${placeholderStyle}>
-            <div class="spinner small"></div>
-          </div>
-        </div>
-        <div class="meta">
-          <h3 class="title">${title}</h3>
-          <div class="addr">${addr1 || ''}</div>
-          <div class="tags">
-            ${cat1 ? `<span class="chip">${cat1}</span>` : ''}
-            ${cat3 ? `<span class="chip">${cat3}</span>` : ''}
-          </div>
-          <div class="card-actions">
-            <div class="star-rating-display" role="button" tabindex="0" aria-label="별점주기">
-              <div class="stars-outer"><div class="stars-inner"></div></div>
-              <span class="rating-info"><span class="rating-avg">…</span> (<span class="rating-count">…</span>)</span>
-            </div>
-            <button type="button" class="review-btn">후기 보기/작성</button>
-          </div>
-        </div>
-      </article>
-    `;
+  const placeholderStyle = firstimage ? `style="background-image: url('/img-proxy?u=${encodeURIComponent(firstimage)}');"` : '';
+  
+  // [핵심 수정] cat1과 cat3의 모든 태그를 합친 후, 중복을 제거하고 최대 2개만 선택합니다.
+  const allTags = [];
+  if (cat1) {
+    allTags.push(cat1.trim());
+  }
+  if (cat3) {
+    const cat3Tags = (cat3 || '')
+      .split(/[,\/|]/)
+      .map(tag => tag.trim())
+      .filter(tag => tag);
+    allTags.push(...cat3Tags);
   }
   
-  // --- 그리드 렌더링 함수 (지연 로딩 적용) ---
+  // 중복 제거 (Set을 사용) 후, 최대 2개만 잘라냅니다.
+  const finalTags = [...new Set(allTags)].slice(0, 2);
+
+  // 선택된 태그들로 HTML을 생성합니다.
+  const tagsHTML = finalTags.map(tag => `<span class="chip">${tag}</span>`).join('');
+
+  return `
+    <article class="place-card" data-title="${title}" data-addr1="${addr1}" data-mapx="${mapx}" data-mapy="${mapy}" data-loaded="false">
+      <div class="rank">#${rank}</div>
+      ${scoreBadgeHTML}
+      <div class="carousel" aria-label="${title} 이미지 프레임">
+        <div class="media-placeholder" ${placeholderStyle}>
+          <div class="spinner small"></div>
+        </div>
+      </div>
+      <div class="meta">
+        <h3 class="title">${title}</h3>
+        <div class="addr">${addr1 || ''}</div>
+        <div class="tags">
+          ${tagsHTML}
+        </div>
+        <div class="card-actions">
+          <div class="star-rating-display" role="button" tabindex="0" aria-label="별점주기">
+            <div class="stars-outer"><div class="stars-inner"></div></div>
+            <span class="rating-info"><span class="rating-avg">…</span> (<span class="rating-count">…</span>)</span>
+          </div>
+          <button type="button" class="review-btn">후기 보기/작성</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+  
+  // --- [수정] 그리드 렌더링 함수 (지연 로딩 적용) ---
   function renderGrid(items) {
     if (!grid) return;
     if (!items || items.length === 0) {
@@ -259,6 +278,7 @@
       entries.forEach(entry => {
         if (entry.isIntersecting) {
           const card = entry.target;
+          // 이미 로딩된 카드는 다시 로딩하지 않음
           if (card.dataset.loaded === 'true') {
             obs.unobserve(card);
             return;
@@ -266,7 +286,10 @@
           card.dataset.loaded = 'true';
           const { title, addr1 } = card.dataset;
           
+          // 별점 정보는 바로 가져옴
           fetchPlaceDetails(card);
+          
+          // [핵심] 이미지는 별도 API로 요청
           fetch(`/api/place-media?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr1)}`)
             .then(res => res.json())
             .then(data => {
@@ -277,13 +300,14 @@
             })
             .catch(err => console.error("Media fetch error:", err));
           
+          // 로딩이 완료된 카드는 더 이상 관찰하지 않음
           obs.unobserve(card);
         }
       });
     };
 
     observer = new IntersectionObserver(observerCallback, {
-      rootMargin: '0px 0px 200px 0px',
+      rootMargin: '0px 0px 200px 0px', // 화면 아래 200px에 카드가 들어오면 미리 로딩
       threshold: 0.01
     });
 
