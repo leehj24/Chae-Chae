@@ -459,7 +459,7 @@ def run(
     itinerary = pd.concat(itins, ignore_index=True) if itins else pd.DataFrame(
         columns=["day","start_time","end_time","title","addr1","cat1","cat2","cat3",
                  "final_score","distance_from_prev_km","move_min","stay_min",
-                 "출발지", "도착지", "교통편1", "교통편2"]
+                 "출발지", "도착지", "교통편1", "교통편2", "mapx", "mapy"]
     )
     return itinerary
 
@@ -545,4 +545,6 @@ def _visit_row(day_i, st: datetime, et: datetime, row: pd.Series, cat: str, dkm:
         "도착지": "",
         "교통편1": "",
         "교통편2": "",
+        "mapx": row.get("lon"), # lon이 mapx
+        "mapy": row.get("lat")  # lat이 mapy
     }

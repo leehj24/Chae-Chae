@@ -390,6 +390,7 @@ def home():
 @app.get("/chat")
 def index():
     _init_session_if_needed()
+    # 아래와 같이 kakao_js_key가 전달되는지 확인!
     return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
 
 @app.post("/chat")

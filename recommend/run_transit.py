@@ -258,17 +258,21 @@ def run(
 
             smin = stay_minutes(n.get("cat1", ""))
             v_end = cur_time + timedelta(minutes=smin)
+
+
             if v_end > day_end:
                 if rows_all and rows_all[-1]["title"] == "이동":
                     last_move = rows_all.pop()
                     cur_time -= timedelta(minutes=last_move["move_min"])
                 return False
                 
+            # ▼▼▼ [수정] mapx, mapy 좌표 추가 ▼▼▼
             rows_all.append({"day_label": label, "day": d, "start_time": cur_time.strftime("%H:%M"), "end_time": v_end.strftime("%H:%M"),
                 "title": _nfc(n["title"]), "addr1": _nfc(n["addr1"]), "cat1": _nfc(n["cat1"]), "cat2": _nfc(n["cat2"]), "cat3": _nfc(n["cat3"]),
                 "출발지": "", "교통편1": "", "교통편2": "", "도착지": "", "final_score": float(n.get("final_score", np.nan)),
-                "distance_from_prev_km": np.nan, "move_min": 0, "stay_min": smin})
-            
+                "distance_from_prev_km": np.nan, "move_min": 0, "stay_min": smin,
+                "mapx": n.get("lon"), "mapy": n.get("lat") # lon이 mapx, lat이 mapy
+            })
             # ▼▼▼ [FIX] Corrected syntax error by splitting the assignment ▼▼▼
             cur_time = v_end
             used_idx.add(idx)
@@ -329,7 +333,7 @@ def run(
 
     return pd.DataFrame(rows_all, columns=["day_label", "day", "start_time", "end_time", "title", "addr1",
         "cat1", "cat2", "cat3", "출발지", "교통편1", "교통편2", "도착지", "final_score",
-        "distance_from_prev_km", "move_min", "stay_min"])
+        "distance_from_prev_km", "move_min", "stay_min","mapx", "mapy"])
 
 
 # ========================
