@@ -529,6 +529,9 @@ def api_place_details():
     if not title or not addr1:
         return _json({"ok": False, "error": "title, addr1이 필요합니다."}, 400)
     kakao_url = _get_kakao_place_url(title, mapx, mapy)
+    if kakao_url and kakao_url.startswith("http://"):
+        kakao_url = kakao_url.replace("http://", "https://", 1)
+        
     key = f"{title}|{addr1}"
     reviews_db = _load_user_reviews()
     place_reviews = reviews_db.get(key, {})
