@@ -16,7 +16,8 @@ from flask_session import Session
 from recommend.config import (PATH_TMF, KAKAO_API_KEY, PATH_KAKAO_IMAGE_CACHE, KAKAO_JS_KEY)
 import recommend.run_walk as run_walk_module
 import recommend.run_transit as run_transit_module
-from filter.utils import get_filter_options
+# [삭제] filter.utils는 더 이상 사용하지 않습니다.
+# from filter.utils import get_filter_options
 
 from filter.cache_builder import update_cache_if_needed
 
@@ -24,6 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
 app.secret_key = "dev-secret-key"
 
+# --- (기존 설정 부분은 동일) ---
 UPLOAD_FOLDER = str(BASE_DIR / "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
@@ -82,12 +84,19 @@ def _init_session_if_needed():
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
 
-_PLACES_CACHE = {"df": None, "mtime": None, "path": None}
+# ▼▼▼ [변경] 메모리 문제 해결을 위한 핵심 수정 ▼▼▼
+
+# [1. 전역 변수 선언]
+# 앱 전체에서 공유할 데이터프레임과 필터 옵션을 저장할 변수를 만듭니다.
+PLACES_DF = None
+FILTER_OPTIONS = None
+
 def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
         try: return pd.read_csv(path, encoding=enc)
         except Exception: pass
     raise IOError(f"Failed to read CSV file with common encodings: {path}")
+
 def _pick_column(df: pd.DataFrame, *names: str) -> str | None:
     low = {c.lower(): c for c in df.columns};
     for n in names:
@@ -98,13 +107,15 @@ def _pick_column(df: pd.DataFrame, *names: str) -> str | None:
             if n.lower() in cl: return c
     return None
 
-def _load_places_df() -> pd.DataFrame:
-    path = PATH_TMF
-    p = Path(path)
-    mtime = p.stat().st_mtime if p.exists() else None
-    if _PLACES_CACHE["df"] is not None and _PLACES_CACHE["mtime"] == mtime: return _PLACES_CACHE["df"].copy()
-    
-    df = _read_csv_robust(path).copy()
+# [2. 데이터 로딩 함수]
+# 기존 _load_places_df 함수를 앱 시작 시 데이터를 로드하고 전처리하는 역할로 변경합니다.
+def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    """
+    앱 시작 시 한번만 호출되어 CSV 파일을 읽고,
+    전처리된 데이터프레임과 필터 옵션을 반환합니다.
+    """
+    print("🚀 앱 시작! 관광지 데이터를 메모리에 로드합니다...")
+    df = _read_csv_robust(PATH_TMF).copy()
     
     req = {
         "title": _pick_column(df, "title", "명칭", "place", "name"),
@@ -116,11 +127,14 @@ def _load_places_df() -> pd.DataFrame:
         "mapy": _pick_column(df, "mapy", "y", "lat", "latitude"),
     }
 
-    if miss := [k for k, v in req.items() if v is None]: raise KeyError(f"Missing required CSV columns: {miss} / Found: {list(df.columns)}")
+    if miss := [k for k, v in req.items() if v is None]:
+        raise KeyError(f"Missing required CSV columns: {miss} / Found: {list(df.columns)}")
+
     opt = {"cat3": _pick_column(df, "cat3", "소분류", "category3"),"firstimage": _pick_column(df, "firstimage", "image", "img1", "thumbnail"),}
     rename_map = {v: k for k, v in req.items() if v}
     for k, v in opt.items():
         if v: rename_map[v] = k
+    
     df = df.rename(columns=rename_map)
     for c in ("cat3", "firstimage"):
         if c not in df.columns: df[c] = ""
@@ -129,9 +143,28 @@ def _load_places_df() -> pd.DataFrame:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
     for c in ("title", "addr1", "cat1", "cat3", "firstimage"):
         df[c] = df[c].astype(str).fillna("")
+
     df = df.drop_duplicates(subset=["title", "addr1"], keep="first").reset_index(drop=True)
-    _PLACES_CACHE.update({"df": df.copy(), "mtime": mtime, "path": path})
-    return df
+
+    # 필터 옵션 생성 로직 추가
+    sidos = sorted(df['addr1'].str.split().str[0].dropna().unique().tolist())
+    cat1s = sorted(df['cat1'].dropna().unique().tolist())
+    
+    all_cat3s = set()
+    df['cat3'].str.split(',').dropna().apply(lambda tags: all_cat3s.update(t.strip() for t in tags if t.strip()))
+    cat3s = sorted(list(all_cat3s))
+    
+    filter_opts = {"sidos": sidos, "cat1s": cat1s, "cat3s": cat3s}
+    
+    print(f"✅ 데이터 로드 완료! 총 {len(df):,}개의 장소, 필터 옵션 생성 완료.")
+    return df, filter_opts
+
+# [3. 앱 시작 시 데이터 로드 실행]
+# Flask 앱이 실행될 때 위 함수를 호출하여 전역 변수에 데이터를 할당합니다.
+PLACES_DF, FILTER_OPTIONS = load_places_data()
+
+# ▲▲▲ 변경점 끝 ▲▲▲
+
 
 def _sort_key_from_param(s: str) -> tuple[str, str]:
     s = (s or "").strip().lower()
@@ -142,6 +175,7 @@ _USER_UPLOADS_LOCK = threading.Lock()
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# --- (기존 _load_user_reviews, _save_user_reviews 등 다른 헬퍼 함수들은 그대로 유지) ---
 def _load_user_reviews():
     with _USER_REVIEWS_LOCK:
         p = Path(PATH_USER_REVIEWS)
@@ -225,39 +259,31 @@ def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     return []
 def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     key = f"{_nfc(title)}|{_nfc(addr1)}"; query = " ".join([title, *_addr_region_tokens(addr1)]); urls = _kakao_image_search(query, size=4); cache = _load_image_cache(); cache[key] = {"q": query, "urls": urls, "ts": int(datetime.now().timestamp())}; _save_image_cache(); return urls
-# app.py
 
 def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None, max_n: int = 4, include_user_uploads: bool = False, auto_fetch_if_needed: bool = False) -> List[str]:
     key = f"{_nfc(title)}|{_nfc(addr1)}"
-    
-    # 전체 데이터 파일을 다시 로드하는 부분을 삭제했습니다.
-    # 대신, 전달받은 이미지 URL을 직접 사용합니다.
     csv_imgs: list[str] = []
     u = str(firstimage_url or '').strip()
     if u and u.lower().startswith('http'):
         csv_imgs.append(u)
-
     kakao_imgs = _images_for_place(title, addr1, max_n=4)
     if not kakao_imgs and auto_fetch_if_needed:
         kakao_imgs = _fetch_and_cache_images_live(title, addr1)
-    
     user_imgs: list[str] = []
     if include_user_uploads:
         uploads_db = _load_user_uploads()
         user_uploads = uploads_db.get(key, [])
         user_imgs = [url_for('uploaded_file', filename=f) if not str(f).startswith('http') else str(f) for f in user_uploads]
-        
     ordered: list[str] = []
     if csv_imgs:
         ordered.append(csv_imgs[0])
-    
     ordered.extend(kakao_imgs)
     ordered.extend(user_imgs)
-    
     ordered = [u for u in ordered if isinstance(u, str) and u.strip()]
     ordered = list(dict.fromkeys(ordered))[:max_n]
     return ordered
 
+# --- (이하 다른 헬퍼 함수들도 그대로 유지) ---
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
     if not KAKAO_API_KEY: return None
     _ensure_session()
@@ -291,7 +317,6 @@ def _nearest_bus(lat, lon) -> str:
                     if docs: return _nfc(docs[0].get("place_name"))
     except Exception: pass
     return ""
-
 def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
     if not KAKAO_API_KEY: return None
     _ensure_session()
@@ -300,15 +325,12 @@ def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
     try:
         res = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", headers=headers, params=params, timeout=3)
         if not res.ok: return None
-        
         docs = res.json().get("documents", [])
         if not docs: return None
-        
         clean_title = title.replace('_', ' ')
         for place in docs:
             if clean_title in place.get("place_name", ""):
                 return place.get("place_url")
-        
         return docs[0].get("place_url")
     except requests.exceptions.RequestException:
         return None
@@ -325,6 +347,7 @@ def start_self_pinging():
             except Exception as e: print(f"❌ self-ping: 알 수 없는 오류 발생: {e}")
     ping_thread = threading.Thread(target=self_ping_task, daemon=True); ping_thread.start()
 
+# --- (라우트 핸들러들) ---
 @app.get("/")
 def home():
     return render_template("home.html")
@@ -332,6 +355,7 @@ def home():
 def index():
     _init_session_if_needed()
     return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
+# ... (기존 /chat, /do_generate 등 다른 라우트들은 그대로 유지) ...
 @app.post("/chat")
 def chat():
     _init_session_if_needed(); state = session.get("state"); messages = session.get("messages", [])
@@ -378,10 +402,17 @@ def go_back():
         session["state"] = state_flow[current_state]["prev"]
     else: session.clear()
     return redirect(url_for("index"))
+
+# ▼▼▼ [변경] /api/filter-options 라우트 수정 ▼▼▼
 @app.get("/api/filter-options")
 def api_filter_options():
-    try: options = get_filter_options(); return _json({"ok": True, "options": options})
-    except Exception as e: traceback.print_exc(); return _json({"ok": False, "error": str(e)}, 500)
+    # 전역 변수에 저장된 필터 옵션을 바로 반환합니다.
+    try:
+        return _json({"ok": True, "options": FILTER_OPTIONS})
+    except Exception as e:
+        traceback.print_exc()
+        return _json({"ok": False, "error": str(e)}, 500)
+
 @app.get("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
@@ -393,36 +424,60 @@ def upload_image():
     if file.filename == '' or not _allowed_file(file.filename): return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
     key = f"{_nfc(title)}|{_nfc(addr1)}"
     uploads = _load_user_uploads(); current_images = uploads.get(key, [])
-    all_images_before_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=False)
+    
+    # [주의] firstimage_url을 찾기 위해 PLACES_DF를 조회해야 합니다.
+    # 이 부분은 성능에 큰 영향이 없으므로 그대로 둡니다.
+    place_row = PLACES_DF[(PLACES_DF['title'] == title) & (PLACES_DF['addr1'] == addr1)]
+    firstimage_url = place_row.iloc[0]['firstimage'] if not place_row.empty else None
+    
+    all_images_before_upload = _get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True, auto_fetch_if_needed=False)
     if len(all_images_before_upload) >= 4: return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
     ext = file.filename.rsplit('.', 1)[1].lower(); filename = secure_filename(f"{uuid.uuid4()}.{ext}"); file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
     current_images.append(filename); uploads[key] = current_images; _save_user_uploads(uploads)
-    all_images_after_upload = _get_all_images_for_place(title, addr1, include_user_uploads=True, auto_fetch_if_needed=False); return _json({"ok": True, "images": all_images_after_upload})
+    all_images_after_upload = _get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True, auto_fetch_if_needed=False); 
+    return _json({"ok": True, "images": all_images_after_upload})
 
+# ▼▼▼ [변경] /api/places 라우트 수정 ▼▼▼
 @app.get("/api/places")
 def api_places():
     try:
-        df = _load_places_df(); sido = request.args.get("sido"); cat1 = request.args.get("cat1"); cat3 = request.args.get("cat3"); query = request.args.get("q"); filtered_df = df.copy()
+        # 더 이상 파일을 읽지 않고, 메모리에 있는 PLACES_DF를 사용합니다.
+        sido = request.args.get("sido"); cat1 = request.args.get("cat1"); cat3 = request.args.get("cat3"); query = request.args.get("q"); 
+        
+        # 필터링을 위해 매번 전체 데이터프레임을 복사하는 대신, 필터링 조건을 순차적으로 적용합니다.
+        # pandas는 이런 연산을 매우 효율적으로 처리합니다.
+        filtered_df = PLACES_DF
+        
         if sido and sido != 'all':
-            sido_val = sido;
+            sido_val = sido_map.get(sido, sido)
             if '강원' in sido_val: sido_prefix = '강원'
             elif '제주' in sido_val: sido_prefix = '제주'
             else: sido_prefix = sido_val
             filtered_df = filtered_df[filtered_df['addr1'].str.startswith(sido_prefix, na=False)]
+        
         if cat1 and cat1 != 'all': filtered_df = filtered_df[filtered_df['cat1'] == cat1]
         if cat3 and cat3 != 'all': filtered_df = filtered_df[filtered_df['cat3'].str.contains(cat3, na=False)]
-        if query: query_nfc = _nfc(query).lower(); filtered_df = filtered_df[filtered_df['title'].str.lower().str.contains(query_nfc, na=False)]
-        sort = request.args.get("sort", "review"); order = request.args.get("order", "desc"); score_col, score_label = _sort_key_from_param(sort); sort_ascending = (order == 'asc'); df_sorted = filtered_df.sort_values(by=[score_col], ascending=sort_ascending, na_position="last").reset_index(drop=True)
-        page = max(1, int(request.args.get("page", 1))); per_page = max(1, min(100, int(request.args.get("per_page", 40)))); total = len(df_sorted); total_pages = max(1, math.ceil(total / per_page)); page = min(page, total_pages); start, end = (page - 1) * per_page, page * per_page; view = df_sorted.iloc[start:end].copy(); view["rank"] = range(start + 1, start + 1 + len(view))
+        if query: 
+            query_nfc = _nfc(query).lower()
+            filtered_df = filtered_df[filtered_df['title'].str.lower().str.contains(query_nfc, na=False)]
+
+        sort = request.args.get("sort", "review"); order = request.args.get("order", "desc"); score_col, score_label = _sort_key_from_param(sort); sort_ascending = (order == 'asc'); 
+        df_sorted = filtered_df.sort_values(by=[score_col], ascending=sort_ascending, na_position="last")
+        
+        page = max(1, int(request.args.get("page", 1))); per_page = max(1, min(100, int(request.args.get("per_page", 40)))); 
+        total = len(df_sorted); 
+        total_pages = max(1, math.ceil(total / per_page)); 
+        page = min(page, total_pages); 
+        start, end = (page - 1) * per_page, page * per_page
+        
+        view = df_sorted.iloc[start:end].copy() # 최종 페이징 결과만 복사
+        view["rank"] = range(start + 1, start + 1 + len(view))
+
         def process_view_to_items(view_df: pd.DataFrame) -> List[Dict]:
             items_list = []
             for _, r in view_df.iterrows():
                 title, addr1 = _nfc(r["title"]), _nfc(r["addr1"])
-                
-                # 이미 가지고 있는 데이터(r)에서 이미지 URL을 가져옵니다.
                 firstimage_url = r.get("firstimage")
-                
-                # 수정한 함수에 이 URL을 전달합니다.
                 all_images = _get_all_images_for_place(
                     title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True
                 )
@@ -436,17 +491,29 @@ def api_places():
                     "mapy": r.get("mapy") if pd.notna(r.get("mapy")) else None,
                 })
             return items_list
+
         return _json({"ok": True, "sort_label": score_label, "sort_col": score_col, "total": total, "page": page, "per_page": per_page, "total_pages": total_pages, "items": process_view_to_items(view),})
-    except Exception as e: print("❌ API Error in /api/places:"); traceback.print_exc(); return _json({"ok": False, "error": str(e)}, 500)
+    except Exception as e: 
+        print("❌ API Error in /api/places:"); traceback.print_exc(); 
+        return _json({"ok": False, "error": str(e)}, 500)
+# ▲▲▲ 변경점 끝 ▲▲▲
+
+# --- (이하 나머지 라우트들은 그대로 유지) ---
 @app.get("/api/place-media")
 def api_place_media():
     title = _nfc(request.args.get("title", "")); addr1 = _nfc(request.args.get("addr1", ""))
     if not title or not addr1: return _json({"ok": False, "error": "title and addr1 are required."}, 400)
-    images = _get_all_images_for_place(title, addr1, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True); coords = _kakao_geocode_coords(title, addr1); payload: Dict[str, Any] = {"ok": True, "images": images}
+    
+    # [주의] 여기도 firstimage_url을 찾아야 합니다.
+    place_row = PLACES_DF[(PLACES_DF['title'] == title) & (PLACES_DF['addr1'] == addr1)]
+    firstimage_url = place_row.iloc[0]['firstimage'] if not place_row.empty else None
+
+    images = _get_all_images_for_place(title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True); 
+    coords = _kakao_geocode_coords(title, addr1); 
+    payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords: payload["coords"] = {"y": coords[0], "x": coords[1]}
     return _json(payload)
 
-# [수정] 텍스트 후기 관련 로직 추가
 @app.get("/api/place-details")
 def api_place_details():
     _init_session_if_needed()
@@ -454,29 +521,22 @@ def api_place_details():
     addr1 = _nfc(request.args.get("addr1", ""))
     mapx = request.args.get("mapx", "")
     mapy = request.args.get("mapy", "")
-
     if not title or not addr1:
         return _json({"ok": False, "error": "title, addr1이 필요합니다."}, 400)
-
     kakao_url = _get_kakao_place_url(title, mapx, mapy)
-
     key = f"{title}|{addr1}"
     reviews_db = _load_user_reviews()
     place_reviews = reviews_db.get(key, {})
-    
     ratings = place_reviews.get("ratings", {})
-    reviews = place_reviews.get("reviews", {}) # 텍스트 후기
-    
+    reviews = place_reviews.get("reviews", {})
     avg_rating = 0
     total_ratings = 0
     if ratings:
         total_ratings = len(ratings)
         avg_rating = sum(ratings.values()) / total_ratings if total_ratings > 0 else 0
-
     my_rating = ratings.get(session.get('user_id'))
     my_review_data = next((r for r in reviews.values() if r.get('user_id') == session.get('user_id')), None)
     my_review_text = my_review_data.get('text') if my_review_data else None
-
     return _json({
         "ok": True,
         "kakao_url": kakao_url,
@@ -486,25 +546,18 @@ def api_place_details():
         "my_review_text": my_review_text,
     })
 
-# [신규] 텍스트 후기 목록을 가져오는 API
 @app.get("/api/get-reviews")
 def get_reviews():
     title = _nfc(request.args.get("title", ""))
     addr1 = _nfc(request.args.get("addr1", ""))
     if not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
-
     key = f"{title}|{addr1}"
     reviews_db = _load_user_reviews()
     place_reviews_data = reviews_db.get(key, {}).get("reviews", {})
-    
-    # 딕셔너리의 값들을 리스트로 변환하여 반환
     reviews_list = list(place_reviews_data.values())
-    
     return _json({"ok": True, "reviews": reviews_list})
 
-
-# [수정] 텍스트 후기 저장을 포함하도록 수정
 @app.post("/api/submit-review")
 def api_submit_review():
     _init_session_if_needed()
@@ -512,19 +565,14 @@ def api_submit_review():
     title = _nfc(data.get("title", ""))
     addr1 = _nfc(data.get("addr1", ""))
     rating = data.get("rating")
-    review_text = data.get("review_text", "").strip() # 후기 텍스트 받기
-
+    review_text = data.get("review_text", "").strip()
     if not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
-    
     key = f"{title}|{addr1}"
     user_id = session.get('user_id')
     reviews_db = _load_user_reviews()
-    
     if key not in reviews_db:
         reviews_db[key] = {"ratings": {}, "reviews": {}}
-
-    # 별점 저장 로직
     if rating is not None:
         try:
             rating_val = int(rating)
@@ -532,21 +580,15 @@ def api_submit_review():
             reviews_db[key].setdefault("ratings", {})[user_id] = rating_val
         except (ValueError, TypeError):
             return _json({"ok": False, "error": "별점은 1-5 사이의 정수여야 합니다."}, 400)
-
-    # 텍스트 후기 저장/수정/삭제 로직
     if review_text:
-        # 기존에 작성한 후기가 있는지 확인
         existing_review_id = next((rid for rid, r in reviews_db[key].get("reviews", {}).items() if r.get('user_id') == user_id), None)
-        
         review_data = {
             "user_id": user_id,
             "text": review_text,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
         review_id = existing_review_id or str(uuid.uuid4())
         reviews_db[key].setdefault("reviews", {})[review_id] = review_data
-    
     _save_user_reviews(reviews_db)
     return _json({"ok": True, "message": "후기가 저장되었습니다."})
 
