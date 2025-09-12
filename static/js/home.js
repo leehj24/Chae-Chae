@@ -204,7 +204,7 @@
       }
   }
 
-// ▼▼▼ [수정] 이 함수 전체를 아래 코드로 교체해주세요 ▼▼▼
+// ▼▼▼ [수정] 카드 HTML 생성 함수 ▼▼▼
 function cardHTML(item) {
   const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy, firstimage } = item;
   let score = state.sort === 'review' ? review_score : tour_score;

@@ -492,7 +492,7 @@ def api_places():
     try:
         sido = request.args.get("sido"); cat1 = request.args.get("cat1"); cat3 = request.args.get("cat3"); query = request.args.get("q")
         
-        # [수정] .copy()를 제거하여 불필요한 메모리 복사를 방지합니다.
+        # [핵심] .copy()를 제거하여 메모리 복사를 방지합니다.
         filtered_df = PLACES_DF
         
         if sido and sido != 'all':

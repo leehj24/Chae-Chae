@@ -1,4 +1,4 @@
-# cache_builder.py
+# filter/cache_builder.py
 import time
 import re
 from pathlib import Path
@@ -119,17 +119,15 @@ def update_cache_if_needed():
     print(f"🚚 총 {len(new_items_to_fetch):,}개의 새로운 장소 이미지를 가져옵니다...")
     
     save_interval = 50
-    for i, item in enumerate(new_items_to_fetch):
+    for i, item in enumerate(tqdm(new_items_to_fetch, desc="이미지 캐싱")):
         title, addr1 = item["title"], item["addr1"]
-        print(f"  -> [{i+1}/{len(new_items_to_fetch)}] '{title}' 이미지 검색 중...")
         
         _fetch_and_cache_images_live(title, addr1)
         time.sleep(0.1) # API 속도 제한 준수를 위해 약간의 딜레이 추가
 
         if (i + 1) % save_interval == 0:
             _save_image_cache()
-            print(f"💾 중간 저장 완료 ({i+1}개 처리)")
-
+            
     _save_image_cache()
     print(f"\n✅ 캐시 업데이트 완료! {len(new_items_to_fetch)}개 항목 추가. 최종 캐시 크기: {len(_load_image_cache()):,}개.")
 
