@@ -231,7 +231,7 @@ def run(
 
     for d in range(1, days + 1):
         base = today0 + timedelta(days=d - 1)
-        day_start = base.replace(hour=8, minute=0)
+        day_start = base.replace(hour=9, minute=0)
         lunch_s, lunch_e = base.replace(hour=11, minute=0), base.replace(hour=13, minute=0)
         dinner_s, dinner_e = base.replace(hour=17, minute=0), base.replace(hour=20, minute=0)
         day_end = base.replace(hour=22, minute=30)
