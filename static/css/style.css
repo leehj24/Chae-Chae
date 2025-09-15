@@ -258,3 +258,64 @@ body{
 .sort-dropdown .sort-menu [role="option"]{ padding:10px 12px; border-radius:8px; cursor:pointer; font-weight:700; }
 .sort-dropdown .sort-menu [role="option"]:hover{ background:var(--chip-bg); }
 .sort-dropdown .sort-menu [aria-selected="true"]{ background: var(--chip-sel); color: var(--brand); }
+
+
+/* static/css/style.css 파일 맨 아래에 추가 */
+
+/* ▼▼▼ [추가] 혼잡도 텍스트 스타일 ▼▼▼ */
+.tl-title {
+  /* 제목과 혼잡도 텍스트를 나란히 정렬하기 위해 flex 사용 */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap; /* 화면이 좁을 때 줄바꿈 허용 */
+}
+
+.congestion-text {
+  font-size: 0.9rem;      /* 제목보다 약간 작은 글씨 크기 */
+  font-weight: 700;
+  margin-left: 10px;      /* 제목과의 간격 */
+  padding: 2px 8px;       /* 텍스트 주변에 약간의 여백 */
+  border-radius: 7px;     /* 살짝 둥근 배경 */
+  line-height: 1.4;
+}
+
+/* 여유 */
+.congestion-low {
+  color: #059669;
+  background-color: #ecfdf5;
+}
+/* 보통 */
+.congestion-medium {
+  color: #3b82f6;
+  background-color: #eef4ff;
+}
+/* 붐빔 */
+.congestion-high {
+  color: #d97706;
+  background-color: #fffbeb;
+}
+/* 매우 붐빔 */
+.congestion-very-high {
+  color: #ef4444;
+  background-color: #fff1f2;
+}
+/* ▲▲▲ [추가] 혼잡도 스타일 종료 ▲▲▲ */
+
+.congestion-low {
+  background-color: #eef4ff;
+  border-color: #dbeaff;
+  color: #3b82f6;
+}
+
+.congestion-medium {
+  background-color: #fffbeb;
+  border-color: #fde68a;
+  color: #d97706;
+}
+
+.congestion-high,
+.congestion-very-high {
+  background-color: #fff1f2;
+  border-color: #ffdde0;
+  color: #ef4444;
+}

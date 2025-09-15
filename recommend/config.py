@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # ✅ CSV 절대경로 (OS 상관없이 안전)
 PATH_TMF = str(ROOT / "관광지_법정동_매핑결과.csv")
 # ▼ 추가: 혼잡도(수단통행량) CSV들이 들어있는 폴더
-PATH_CONGESTION_DIR = str(ROOT / "지역별 통합")
+PATH_CONGESTION_FINAL = str(ROOT / "congestion_level"/"혼잡도 최종등급_전국.csv")
 
 # (선택) Flask 세션키
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")

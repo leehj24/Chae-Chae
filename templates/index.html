@@ -60,7 +60,16 @@
                         <div class="tl-text-content">
                           <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
                           {% if not is_move %}
-                            <h4 class="tl-title"><span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>{{ r.title }}</h4>
+                            {# ▼▼▼ [핵심 수정] h4 태그 한 줄을 아래 코드로 교체하세요. ▼▼▼ #}
+                            <h4 class="tl-title">
+                              <span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>
+                              {{ r.title }}
+                              {% if r.congestion_level and r.congestion_level != '정보 없음' %}
+                                <span class="congestion-text congestion-{{ r.congestion_class }}">{{ r.congestion_level }}</span>
+                              {% endif %}
+                            </h4>
+                            {# ▲▲▲ [핵심 수정] 여기까지 입니다. ▲▲▲ #}
+
                             <div class="addr">{{ r.addr1 }}</div>
                             <div class="tags">
                               {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
