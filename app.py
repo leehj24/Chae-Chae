@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 from flask import (Flask, Response, redirect, render_template, request, session, url_for, abort, send_from_directory)
 from flask_session import Session
 
-from recommend.config import (PATH_TMF, KAKAO_API_KEY, PATH_KAKAO_IMAGE_CACHE, KAKAO_JS_KEY)
+from recommend.config import *
 import recommend.run_walk as run_walk_module
 import recommend.run_transit as run_transit_module
 
