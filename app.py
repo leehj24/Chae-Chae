@@ -109,18 +109,21 @@ def load_congestion_final_data(path: str) -> Optional[pd.DataFrame]:
         return None
 
 def parse_address_for_key(address: str) -> tuple[str | None, str | None, str | None]:
-    """주소에서 조회에 사용할 짧은 시도 키(예: '강원')와 시군구, 읍면동을 추출합니다."""
     address = _nfc(address)
     parts = address.split()
-    if not parts: return None, None, None
-    
-    # 주소의 첫 단어를 기반으로 sido_map에서 짧은 키(값)를 찾음
-    sido_key = next((val for key, val in sido_map.items() if parts[0].startswith(key)), None)
-    if not sido_key: return None, None, None
+    if not parts:
+        return None, None, None
 
-    sigungu = next((p for p in parts[1:] if p.endswith(('시', '군', '구'))), None)
-    eupmyeondong = next((p for p in parts[1:] if p.endswith(('읍', '면', '동', '가')) and p != sigungu), None)
+    # ✅ 후보 키들 중 ‘가장 짧은’ 키를 선택 → 축약형(부산, 경북…)을 우선
+    candidates = [k for k in sido_map.keys() if parts[0].startswith(k)]
+    sido_key = min(candidates, key=len) if candidates else None
+    if not sido_key:
+        return None, None, None
 
+    # 괄호 표기를 제거해 읍/면/동 인식을 보강
+    norm = [p.strip('()') for p in parts[1:]]
+    sigungu = next((p for p in norm if p.endswith(('시', '군', '구'))), None)
+    eupmyeondong = next((p for p in norm if p.endswith(('읍', '면', '동', '가')) and p != sigungu), None)
     return sido_key, sigungu, eupmyeondong
 
 def get_congestion_level(sido_key: str, sigungu: str, eupmyeondong: Optional[str], hour: int, df: pd.DataFrame) -> Optional[str]:

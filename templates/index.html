@@ -64,10 +64,11 @@
                             <h4 class="tl-title">
                               <span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>
                               {{ r.title }}
-                              {% if r.congestion_level and r.congestion_level != '정보 없음' %}
-                                <span class="congestion-text congestion-{{ r.congestion_class }}">{{ r.congestion_level }}</span>
-                              {% endif %}
+                              {# ✅ 항상 출력. 없으면 '정보 없음', 클래스 없으면 'unknown' #}
+                              {% set ctext = r.congestion_level or '정보 없음' %}
+                              <span class="congestion-text congestion-{{ r.congestion_class or 'unknown' }}">{{ ctext }}</span>
                             </h4>
+
                             {# ▲▲▲ [핵심 수정] 여기까지 입니다. ▲▲▲ #}
 
                             <div class="addr">{{ r.addr1 }}</div>
