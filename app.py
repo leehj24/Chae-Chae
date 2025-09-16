@@ -889,6 +889,7 @@ def kakao_auth():
     return redirect(auth_url)
 
 
+
 @app.get("/kakaotalk/callback")
 def kakao_oauth_callback():
     """카카오 인증 후 콜백을 처리하고 메시지를 전송합니다."""
@@ -909,8 +910,13 @@ def kakao_oauth_callback():
         flash("전송할 일정 정보가 없습니다. 새로운 추천을 받아주세요.", "error")
         return redirect(url_for('index'))
 
-    # ▼▼▼ [핵심 수정] 성공/실패(True/False) 결과에 따라 분기 처리 ▼▼▼
-    success = kakaotalk.send_message_to_me(access_token, itinerary)
+    chat_page_url = url_for('index', _external=True)
+
+    # ✅ [디버깅 코드 추가] 
+    # 생성된 URL이 실제로 어떤 값인지 터미널/로그에 출력해서 확인합니다.
+    print(f"🚀 생성된 채팅 페이지 URL: {chat_page_url}")
+
+    success = kakaotalk.send_message_to_me(access_token, itinerary, chat_page_url)
 
     if success:
         flash("카카오톡 메시지를 성공적으로 보냈습니다!", "success")
@@ -918,7 +924,6 @@ def kakao_oauth_callback():
     else:
         flash("카카오톡 메시지 전송 중 일부 실패했습니다.", "error")
         print("❌ 카카오톡 메시지 전송 중 일부 실패")
-    # ▲▲▲ 여기까지 입니다. ▲▲▲
 
     return redirect(url_for('index'))
 

@@ -58,7 +58,7 @@ def _create_text_for_one_day(day_items: list, chunk_num: int = 1, total_chunks: 
         return full_text[:197] + "..."
     return full_text
 
-def send_message_to_me(access_token: str, itinerary: list) -> bool:
+def send_message_to_me(access_token: str, itinerary: list, chat_url: str) -> bool:
     """
     Sends multiple messages using the default template (link is required).
     Long itineraries are split into multiple messages.
@@ -93,8 +93,8 @@ def send_message_to_me(access_token: str, itinerary: list) -> bool:
                 "object_type": "text",
                 "text": daily_text,
                 "link": {
-                    "web_url": url_for('home', _external=True),
-                    "mobile_web_url": url_for('home', _external=True)
+                    "web_url": chat_url,
+                    "mobile_web_url": chat_url
                 }
             }
             
