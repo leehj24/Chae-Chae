@@ -34,8 +34,11 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-for-testing")
 UPLOAD_FOLDER = str(BASE_DIR / "uploads")
+# ▼▼▼ [추가] 공유 일정 파일을 저장할 폴더 경로 ▼▼▼
+PATH_SHARED_ITINERARIES = str(BASE_DIR / "_shared_itineraries")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
+Path(PATH_SHARED_ITINERARIES).mkdir(exist_ok=True) # 폴더 생성
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024
 app.config.update(
@@ -418,10 +421,8 @@ def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None
         
     user_imgs = []
     if include_user_uploads:
-        # ▼▼▼ [수정] 데이터 구조 변경에 따라 파일명만 추출하도록 수정 ▼▼▼
         upload_entries = _load_user_uploads().get(f"{_nfc(title)}|{_nfc(addr1)}", [])
         user_imgs = [url_for('uploaded_file', filename=entry.get('filename')) for entry in upload_entries if entry.get('filename')]
-        # ▲▲▲ [수정 완료] ▲▲▲
 
     ordered, seen = [], set()
     for img_url in sum([csv_imgs, kakao_imgs, user_imgs], []):
@@ -430,14 +431,9 @@ def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None
             ordered.append(img_url)
     return ordered[:max_n]
 
-# ... (다른 코드는 그대로 둡니다) ...
-
-# app.py
-
-# 이 버전의 함수만 남겨주세요!
 @app.post("/api/upload-image")
 def upload_image():
-    _init_session_if_needed() # <-- 세션 초기화
+    _init_session_if_needed()
     title, addr1 = request.form.get('title'), request.form.get('addr1')
     if 'file' not in request.files or not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
@@ -447,7 +443,6 @@ def upload_image():
 
     key = f"{_nfc(title)}|{_nfc(addr1)}"
     
-    # 사용자별 업로드 제한 로직
     user_id = session.get('user_id')
     uploads = _load_user_uploads()
     place_uploads = uploads.get(key, [])
@@ -466,7 +461,6 @@ def upload_image():
     filename = secure_filename(f"{uuid.uuid4()}.{ext}")
     file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
-    # 사용자 ID와 파일명을 함께 저장
     new_entry = {"user_id": user_id, "filename": filename}
     uploads.setdefault(key, []).append(new_entry)
     _save_user_uploads(uploads)
@@ -593,8 +587,6 @@ def chat():
     _trim_msgs()
     return redirect(url_for("index"))
 
-# app.py
-
 @app.post("/do_generate")
 def do_generate():
     try:
@@ -614,11 +606,6 @@ def do_generate():
         else:
             itinerary_df = add_congestion_to_schedule(itinerary_df, CONGESTION_DF)
             itinerary_records = _df_to_records(itinerary_df)
-
-            # ▼▼▼ [핵심 변경] ▼▼▼
-            # 이미지와 좌표를 미리 가져오는 느린 로직을 모두 삭제하고,
-            # 'firstimage' (대표 이미지) 정보만 추가합니다.
-            # 이 대표 이미지는 로딩 전 placeholder 배경으로 사용됩니다.
             for item in itinerary_records:
                 if item.get("title") != "이동":
                     title = item.get("title", "")
@@ -629,7 +616,26 @@ def do_generate():
                     firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else ""
                     
                     item["firstimage"] = firstimage_url
-            # ▲▲▲ [변경 완료] ▲▲▲
+        
+        # ▼▼▼ [추가] 일정 저장 및 공유 ID 생성 로직 ▼▼▼
+        share_id = str(uuid.uuid4())
+        share_path = Path(PATH_SHARED_ITINERARIES) / f"{share_id}.json"
+        
+        share_data = {
+            "itinerary": itinerary_records,
+            "region": session.get("region"),
+            "score_label": session.get("score_label"),
+            "cats": session.get("cats"),
+            "days": session.get("days"),
+            "transport_mode": session.get("transport_mode"),
+            "start_date": session.get("start_date"),
+            "end_date": session.get("end_date")
+        }
+        with open(share_path, 'w', encoding='utf-8') as f:
+            json.dump(share_data, f, ensure_ascii=False)
+        
+        session["share_id"] = share_id
+        # ▲▲▲ [추가 완료] ▲▲▲
 
         session["itinerary"] = itinerary_records
         session["state"] = "완료"
@@ -684,7 +690,6 @@ def api_filter_options():
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
-
 @app.get("/api/places")
 def api_places():
     try:
@@ -729,18 +734,14 @@ def api_place_media():
     if not title or not addr1:
         return _json({"ok": False, "error": "title and addr1 are required."}, 400)
 
-    # 데이터베이스에서 장소의 대표 이미지 URL 가져오기
     place_mask = (PLACES_DF['title'].astype('object') == title) & (PLACES_DF['addr1'].astype('object') == addr1)
     place_rows = PLACES_DF[place_mask]
     firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else None
 
-    # 모든 이미지(사용자 업로드 포함, 없으면 실시간 조회) 가져오기
     images = _get_all_images_for_place(title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
     
-    # 카카오 API로 지도 좌표 가져오기
     coords = _kakao_geocode_coords(title, addr1)
     
-    # 최종적으로 필요한 모든 미디어 정보를 JSON으로 묶어서 전달
     payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords:
         payload["coords"] = {"y": coords[0], "x": coords[1]}
@@ -913,14 +914,33 @@ def kakao_oauth_callback():
         return redirect(url_for('index'))
 
     itinerary = session.get("itinerary")
-    if not itinerary:
+    share_id = session.get("share_id")
+
+    if not itinerary or not share_id:
         flash("전송할 일정 정보가 없습니다. 새로운 추천을 받아주세요.", "error")
         return redirect(url_for('index'))
+    
+    # ▼▼▼ [수정] 외부 서버 환경에서 전체 URL을 더 안정적으로 생성하는 로직으로 변경 ▼▼▼
+    # 기존: share_url = url_for('view_shared_itinerary', share_id=share_id, _external=True)
 
-    chat_page_url = url_for('index', _external=True)
-    print(f"🚀 생성된 채팅 페이지 URL: {chat_page_url}")
+    # 1. Render.com 같은 서비스에 배포된 경우, 환경 변수에서 기본 URL을 가져옵니다.
+    base_url = os.environ.get("RENDER_EXTERNAL_URL")
 
-    success = kakaotalk.send_message_to_me(access_token, itinerary, chat_page_url)
+    # 2. 로컬 환경에서 테스트하는 경우를 위한 대비책
+    if not base_url:
+        # url_for를 사용해 현재 요청의 기본 URL(http://127.0.0.1:5000 등)을 알아냅니다.
+        base_url = url_for('home', _external=True)
+        # 만약 URL이 '/'로 끝나면 제거합니다. (예: http://test.com/ -> http://test.com)
+        if base_url.endswith('/'):
+            base_url = base_url[:-1]
+
+    # 3. 기본 URL과 경로, share_id를 직접 조합하여 최종 URL을 만듭니다.
+    share_url = f"{base_url}/share/{share_id}"
+    
+    print(f"🚀 생성된 공유 페이지 URL (수정된 방식): {share_url}")
+    # ▲▲▲ [수정 완료] ▲▲▲
+
+    success = kakaotalk.send_message_to_me(access_token, itinerary, share_url)
     if success:
         flash("카카오톡 메시지를 성공적으로 보냈습니다!", "success")
         print("✅ 카카오톡 메시지 전송 성공!")
@@ -929,6 +949,28 @@ def kakao_oauth_callback():
         print("❌ 카카오톡 메시지 전송 중 일부 실패")
 
     return redirect(url_for('index'))
+
+# ▼▼▼ [추가] 공유된 일정을 보여주는 새로운 페이지 라우트 ▼▼▼
+@app.get("/share/<share_id>")
+def view_shared_itinerary(share_id):
+    # 보안을 위해 파일 이름으로 사용되기 전에 share_id를 정리합니다.
+    safe_share_id = secure_filename(share_id)
+    share_path = Path(PATH_SHARED_ITINERARIES) / f"{safe_share_id}.json"
+    
+    if not share_path.exists():
+        abort(404) # 파일이 없으면 404 에러를 반환합니다.
+    
+    try:
+        with open(share_path, 'r', encoding='utf-8') as f:
+            share_data = json.load(f)
+    except (IOError, json.JSONDecodeError):
+        abort(500) # 파일 읽기 오류 시 500 에러를 반환합니다.
+
+    return render_template("share.html", 
+                           itinerary=share_data.get("itinerary", []),
+                           share_info=share_data,
+                           kakao_js_key=KAKAO_JS_KEY)
+# ▲▲▲ [추가 완료] ▲▲▲
 
 # ======================================================================
 
