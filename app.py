@@ -411,19 +411,69 @@ def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
 def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None, max_n: int = 4, include_user_uploads: bool = False, auto_fetch_if_needed: bool = False) -> List[str]:
     u = str(firstimage_url or '').strip()
     csv_imgs = [u] if u and u.lower().startswith('http') else []
+    
     kakao_imgs = _images_for_place(title, addr1, max_n=4)
     if not kakao_imgs and auto_fetch_if_needed:
         kakao_imgs = _fetch_and_cache_images_live(title, addr1)
+        
     user_imgs = []
     if include_user_uploads:
-        user_uploads = _load_user_uploads().get(f"{_nfc(title)}|{_nfc(addr1)}", [])
-        user_imgs = [url_for('uploaded_file', filename=f) for f in user_uploads]
+        # ▼▼▼ [수정] 데이터 구조 변경에 따라 파일명만 추출하도록 수정 ▼▼▼
+        upload_entries = _load_user_uploads().get(f"{_nfc(title)}|{_nfc(addr1)}", [])
+        user_imgs = [url_for('uploaded_file', filename=entry.get('filename')) for entry in upload_entries if entry.get('filename')]
+        # ▲▲▲ [수정 완료] ▲▲▲
+
     ordered, seen = [], set()
     for img_url in sum([csv_imgs, kakao_imgs, user_imgs], []):
         if img_url and img_url not in seen:
             seen.add(img_url)
             ordered.append(img_url)
     return ordered[:max_n]
+
+# ... (다른 코드는 그대로 둡니다) ...
+
+# app.py
+
+# 이 버전의 함수만 남겨주세요!
+@app.post("/api/upload-image")
+def upload_image():
+    _init_session_if_needed() # <-- 세션 초기화
+    title, addr1 = request.form.get('title'), request.form.get('addr1')
+    if 'file' not in request.files or not title or not addr1:
+        return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
+    file = request.files['file']
+    if file.filename == '' or not _allowed_file(file.filename):
+        return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
+
+    key = f"{_nfc(title)}|{_nfc(addr1)}"
+    
+    # 사용자별 업로드 제한 로직
+    user_id = session.get('user_id')
+    uploads = _load_user_uploads()
+    place_uploads = uploads.get(key, [])
+
+    if any(entry.get('user_id') == user_id for entry in place_uploads):
+        return _json({"ok": False, "error": "이미 이 장소에 사진을 업로드하셨습니다."}, 400)
+
+    place_rows = PLACES_DF[(PLACES_DF['title'] == title) & (PLACES_DF['addr1'] == addr1)]
+    firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty else None
+    
+    current_images_count = len(_get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True))
+    if current_images_count >= 4:
+        return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
+
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    filename = secure_filename(f"{uuid.uuid4()}.{ext}")
+    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+    # 사용자 ID와 파일명을 함께 저장
+    new_entry = {"user_id": user_id, "filename": filename}
+    uploads.setdefault(key, []).append(new_entry)
+    _save_user_uploads(uploads)
+
+    all_images = _get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True)
+    return _json({"ok": True, "images": all_images})
+
 
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
     if not KAKAO_API_KEY: return None
@@ -634,31 +684,6 @@ def api_filter_options():
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
-@app.post("/api/upload-image")
-def upload_image():
-    title, addr1 = request.form.get('title'), request.form.get('addr1')
-    if 'file' not in request.files or not title or not addr1:
-        return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
-    file = request.files['file']
-    if file.filename == '' or not _allowed_file(file.filename):
-        return _json({"ok": False, "error": "허용되지 않는 파일 형식입니다."}, 400)
-
-    key = f"{_nfc(title)}|{_nfc(addr1)}"
-    place_rows = PLACES_DF[(PLACES_DF['title'] == title) & (PLACES_DF['addr1'] == addr1)]
-    firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty else None
-    if len(_get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True)) >= 4:
-        return _json({"ok": False, "error": "이미지를 최대 4개까지 등록할 수 있습니다."}, 400)
-
-    ext = file.filename.rsplit('.', 1)[1].lower()
-    filename = secure_filename(f"{uuid.uuid4()}.{ext}")
-    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-
-    uploads = _load_user_uploads()
-    uploads.setdefault(key, []).append(filename)
-    _save_user_uploads(uploads)
-
-    all_images = _get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True)
-    return _json({"ok": True, "images": all_images})
 
 @app.get("/api/places")
 def api_places():
