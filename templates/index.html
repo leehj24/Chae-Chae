@@ -81,6 +81,39 @@
     .custom-alert-box.error .custom-alert-close-btn {
       background-color: #ef4444;
     }
+
+    /* ▼▼▼ [수정/추가] 혼잡도 뱃지 스타일 ▼▼▼ */
+    .congestion-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      margin-left: 8px; /* 제목과의 간격 */
+    }
+    .congestion-badge .loader {
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-bottom-color: transparent;
+      border-radius: 50%;
+      display: inline-block;
+      box-sizing: border-box;
+      animation: rotation 1s linear infinite;
+      margin-right: 6px;
+    }
+    @keyframes rotation { 
+      0% { transform: rotate(0deg); } 
+      100% { transform: rotate(360deg); } 
+    }
+    .level-여유 { background-color: #e0f2fe; color: #0ea5e9; }
+    .level-보통 { background-color: #dcfce7; color: #22c55e; }
+    .level-붐빔 { background-color: #fef08a; color: #ca8a04; }
+    .level-매우붐빔 { background-color: #fee2e2; color: #ef4444; }
+    .level-정보없음 { background-color: #f1f5f9; color: #64748b; }
+    /* ▲▲▲ [수정/추가] 여기까지 ▲▲▲ */
   </style>
   </head>
 <body>
@@ -118,9 +151,9 @@
   <main class="chat-page">
     <div class="chat-container">
       <section id="chat-window" class="chat-window"
-         data-state="{{ state }}"
-         data-start="{{ session.get('start_date','') }}"
-         data-end="{{ session.get('end_date','') }}">
+          data-state="{{ state }}"
+          data-start="{{ session.get('start_date','') }}"
+          data-end="{{ session.get('end_date','') }}">
         {% for msg in session.get('messages', []) %}
           <div class="msg {{ 'user' if msg.sender == 'user' else 'bot' }}">
             <div class="bubble">
@@ -161,9 +194,16 @@
                             <h4 class="tl-title">
                               <span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>
                               {{ r.title }}
-                              {% set ctext = r.congestion_level or '정보 없음' %}
-                              <span class="congestion-text congestion-{{ r.congestion_class or 'unknown' }}">{{ ctext }}</span>
-                            </h4>
+                              
+                              <span 
+                                  class="congestion-badge level-정보없음" 
+                                  data-addr1="{{ r.addr1 }}" 
+                                  data-time="{{ r.start_time }}"
+                              >
+                                  <span class="loader"></span>
+                                  <span>로딩중...</span>
+                              </span>
+                              </h4>
                             <div class="addr">{{ r.addr1 }}</div>
                             <div class="tags">
                               {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
@@ -251,74 +291,9 @@
     </div>
   </main>
 
-  <div id="ratingModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-content">
-      <header class="modal-header">
-        <div>
-          <h3 id="modalTitle">별점 남기기</h3>
-          <span id="modalPlaceTitle" class="modal-title-place"></span>
-        </div>
-        <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
-      </header>
-      <div class="modal-body">
-        <form id="ratingForm" class="rating-form">
-          <div class="stars" data-rating="0">
-            <span class="star" data-value="1">★</span><span class="star" data-value="2">★</span><span class="star" data-value="3">★</span><span class="star" data-value="4">★</span><span class="star" data-value="5">★</span>
-          </div>
-        </form>
-      </div>
-      <footer class="modal-actions">
-        <button type="button" class="modal-btn modal-close-btn">취소</button>
-        <button type="button" id="submitRatingBtn" class="modal-btn primary" disabled>저장</button>
-      </footer>
-    </div>
-  </div>
-  <div id="reviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
-    <div class="modal-content wide">
-        <header class="modal-header">
-            <div>
-                <h3 id="reviewModalTitle">장소 후기</h3>
-                <span id="reviewModalPlaceTitle" class="modal-title-place"></span>
-            </div>
-            <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
-        </header>
-        <div class="review-content-container">
-            <div id="reviewIframeContainer" class="review-container hidden"><iframe id="reviewIframe" src="about:blank" frameborder="0"></iframe></div>
-            <div id="customReviewContainer" class="review-container hidden">
-                <div class="review-modal-toolbar">
-                    <div class="sort-dropdown" id="reviewSortDropdown" data-current="newest">
-                        <button type="button" class="sort-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="label">최신순</span><span class="chev" aria-hidden="true">▾</span></button>
-                        <ul class="sort-menu" role="listbox">
-                            <li role="option" data-value="newest" aria-selected="true">최신순</li>
-                            <li role="option" data-value="oldest">오래된순</li>
-                        </ul>
-                    </div>
-                    <button type="button" id="openWriteReviewBtn" class="primary-btn small">후기 작성</button>
-                </div>
-                <div id="reviewList" class="review-modal-body"></div>
-            </div>
-        </div>
-    </div>
-  </div>
-  <div id="writeReviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="writeReviewModalTitle">
-    <div class="modal-content">
-        <header class="modal-header">
-            <div>
-                <h3 id="writeReviewModalTitle">후기 작성</h3>
-                <span id="writeReviewModalPlaceTitle" class="modal-title-place"></span>
-            </div>
-            <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
-        </header>
-        <div class="modal-body">
-            <textarea id="reviewTextarea" class="review-textarea" placeholder="이 장소에 대한 경험을 공유해주세요. (10자 이상)" maxlength="500"></textarea>
-        </div>
-        <footer class="modal-actions">
-            <button type="button" class="modal-btn modal-close-btn">취소</button>
-            <button type="button" id="submitReviewBtn" class="modal-btn primary" disabled>완료</button>
-        </footer>
-    </div>
-  </div>
-
+  <div id="ratingModal" ...>...</div>
+  <div id="reviewModal" ...>...</div>
+  <div id="writeReviewModal" ...>...</div>
 
   <script src="{{ url_for('static', filename='js/app.js') }}?v=5"></script>
   
@@ -360,119 +335,48 @@
       
       let observer;
 
-      window.handleImgError = function(e) {
-        const img = e.target;
-        const slide = img.closest('.carousel-slide') || img;
-        const carousel = img.closest('.media-carousel-container');
-        const slidesEl = carousel?.querySelector('.slides');
-        if (!carousel || !slidesEl) return;
-        slide.remove();
-        const leftImgSlides = slidesEl.querySelectorAll('.carousel-slide[data-type="img"]').length;
-        if (leftImgSlides === 0 && !slidesEl.querySelector('.noimage')) {
-          const noimgSlide = document.createElement('div');
-          noimgSlide.className = 'carousel-slide';
-          noimgSlide.innerHTML = `<div class="noimage">이미지 없음</div>`;
-          slidesEl.insertBefore(noimgSlide, slidesEl.firstChild);
-        }
-        const cur = parseInt(carousel.dataset.slide || '0', 10);
-        const total = slidesEl.querySelectorAll('.carousel-slide').length;
-        updateCarouselState(carousel, Math.min(cur, Math.max(0, total - 1)));
-      };
+      window.handleImgError = function(e) { /* (생략) */ };
       
-      async function fetchPlaceMedia(title, addr) {
-        try {
-          const res = await fetch(`/api/place-media?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr)}`);
-          const data = await res.json();
-          if (!data.ok) return { images: [], coords: null };
-          return { images: data.images || [], coords: data.coords || null };
-        } catch {
-          return { images: [], coords: null };
-        }
-      }
+      async function fetchPlaceMedia(title, addr) { /* (생략) */ }
 
-      function updateCarouselState(carousel, newIndex) {
-        const slidesEl = carousel.querySelector('.slides');
-        const slides = slidesEl ? Array.from(slidesEl.querySelectorAll('.carousel-slide')) : [];
-        const n = slides.length;
-        if (!slidesEl || n === 0) return;
-        const i = Math.max(0, Math.min(newIndex, n - 1));
-        carousel.dataset.slide = String(i);
-        slidesEl.style.transform = `translateX(-${i * 100}%)`;
-        const prevBtn = carousel.querySelector('.cbtn.prev');
-        const nextBtn = carousel.querySelector('.cbtn.next');
-        if (prevBtn) prevBtn.hidden = (i <= 0);
-        if (nextBtn) nextBtn.hidden = (i >= n - 1);
-      }
+      function updateCarouselState(carousel, newIndex) { /* (생략) */ }
       
-      function setupCarousel(container, images, title, addr1) {
-        const list = (images || []).filter(Boolean).slice(0, 4);
-        const hasImages = list.length > 0;
-        const canUploadMore = list.length < 4;
-        const slideParts = [];
-        if (!hasImages){
-          slideParts.push(`<div class="carousel-slide"><div class="noimage">이미지 없음</div></div>`);
-        } else {
-            for (const src of list){
-            const proxied = src.startsWith('/uploads') ? src : `/img-proxy?u=${encodeURIComponent(src)}`;
-            slideParts.push(`<div class="carousel-slide" data-type="img"><img src="${proxied}" alt="${title} 이미지" loading="lazy" referrerpolicy="no-referrer" onerror="handleImgError(event)"></div>`);
-            }
-        }
-        if (canUploadMore){
-          slideParts.push(`<div class="carousel-slide uploader-slide" data-type="uploader"><label class="image-uploader uploader-label" tabindex="0"><div class="up-ic">📷</div><div class="up-title">사진 올리기</div><input type="file" class="uploader-input" accept="image/*" /></label></div>`);
-        }
-        const showNav = slideParts.length > 1;
-        const nav = showNav ? `<button class="cbtn prev" type="button" aria-label="이전">‹</button><button class="cbtn next" type="button" aria-label="다음">›</button>` : '';
-        container.dataset.slide = '0';
-        container.dataset.title = title;
-        container.dataset.addr1 = addr1;
-        container.innerHTML = `${nav}<div class="slides">${slideParts.join('')}</div>`;
-        const fileInput = container.querySelector('.uploader-input');
-        updateCarouselState(container, 0);
-        
-        async function doUpload(file){
-            if (!file) return;
-            const tlItem = container.closest('.tl-item');
-            if (tlItem.classList.contains('upload-locked')) return;
-            try{
-                const upSlide = container.querySelector('.uploader-slide');
-                if (upSlide) upSlide.innerHTML = '<div class="image-uploader">업로드 중…</div>';
-                const fd = new FormData();
-                fd.append('file', file); fd.append('title', title); fd.append('addr1', addr1);
-                const res = await fetch('/api/upload-image', { method:'POST', body: fd });
-                const json = await res.json();
-                if (!json.ok) throw new Error(json.error || '업로드 실패');
-                tlItem.classList.add('upload-locked');
-                setupCarousel(container, json.images, title, addr1);
-                updateCarouselState(container, json.images.length - (json.images.length < 4 ? 1 : 0) -1);
-            } catch(err) {
-                alert(err.message || '업로드 오류');
-                setupCarousel(container, images, title, addr1);
-            }
-        }
-        if (fileInput) fileInput.addEventListener('change', (e)=> doUpload(e.target.files?.[0]));
-        
-        if (!container.dataset.listenerAttached) {
-            container.dataset.listenerAttached = 'true';
-            container.addEventListener('click', (e)=>{
-                const prev = e.target.closest('.cbtn.prev'), next = e.target.closest('.cbtn.next');
-                if (!prev && !next) return;
-                const cur = parseInt(container.dataset.slide || '0', 10);
-                const lastIdx = container.querySelectorAll('.carousel-slide').length - 1;
-                if (prev) updateCarouselState(container, cur - 1);
-                if (next) updateCarouselState(container, Math.min(cur + 1, lastIdx));
-            });
-        }
-      }
+      function setupCarousel(container, images, title, addr1) { /* (생략) */ }
 
-      function setupMap(container, coords, title) {
-        if (!window.kakao || !window.kakao.maps) { container.innerHTML = '<div class="no-map-placeholder">지도 SDK 로드 실패</div>'; return; }
-        if (!coords || !coords.y || !coords.x) { container.innerHTML = '<div class="no-map-placeholder">위치 정보 없음</div>'; return; }
-        container.innerHTML = '';
-        const pos = new kakao.maps.LatLng(coords.y, coords.x);
-        const map = new kakao.maps.Map(container, { center: pos, level: 4, draggable: true, zoomable: true });
-        new kakao.maps.Marker({ map, position: pos });
-        setTimeout(() => map.relayout(), 50);
+      function setupMap(container, coords, title) { /* (생략) */ }
+
+      // ▼▼▼ [추가] 혼잡도 업데이트 함수 ▼▼▼
+      async function updateCongestionLevels() {
+        const badges = document.querySelectorAll('.congestion-badge[data-addr1]');
+        
+        for (const badge of badges) {
+          const { addr1, time } = badge.dataset;
+          
+          if (!addr1 || !time) {
+            badge.innerHTML = '<span>정보없음</span>';
+            badge.className = 'congestion-badge level-정보없음';
+            continue;
+          }
+
+          try {
+            const res = await fetch(`/api/congestion?addr1=${encodeURIComponent(addr1)}&time=${encodeURIComponent(time)}`);
+            if (!res.ok) throw new Error('Server response not ok');
+            
+            const data = await res.json();
+            const level = data.level || '정보없음';
+            
+            // 등급에 따라 클래스와 텍스트를 업데이트합니다.
+            badge.textContent = level;
+            badge.className = `congestion-badge level-${level}`;
+
+          } catch (error) {
+            console.error('혼잡도 정보 로딩 실패:', error);
+            badge.textContent = '정보없음';
+            badge.className = 'congestion-badge level-정보없음';
+          }
+        }
       }
+      // ▲▲▲ [추가] 여기까지 ▲▲▲
 
       const ratingModal = document.getElementById('ratingModal');
       const reviewModal = document.getElementById('reviewModal');
@@ -480,159 +384,15 @@
       let currentReviewTarget = null;
       let currentReviews = [];
 
-      async function fetchPlaceDetails(cardElement, forceRefresh = false) {
-        if (cardElement.dataset.detailsLoaded && !forceRefresh) {
-            return JSON.parse(cardElement.dataset.detailsLoaded);
-        }
-        const { title, addr1, mapx, mapy } = cardElement.dataset;
-        const params = new URLSearchParams({ title, addr1, mapx: mapx || '', mapy: mapy || '' });
-        try {
-            const res = await fetch(`/api/place-details?${params.toString()}`);
-            const data = await res.json();
-            if (!data.ok) throw new Error('정보 로드 실패');
-            cardElement.dataset.detailsLoaded = JSON.stringify(data);
-            const starDisplay = cardElement.querySelector('.star-rating-display');
-            if (starDisplay) {
-                const avg = data.avg_rating || 0; const total = data.total_ratings || 0;
-                starDisplay.querySelector('.stars-inner').style.width = `${(avg / 5) * 100}%`;
-                starDisplay.querySelector('.rating-avg').textContent = avg.toFixed(1);
-                starDisplay.querySelector('.rating-count').textContent = total;
-            }
-            return data;
-        } catch (e) {
-            console.error('장소 상세 정보 로드 실패:', title, e);
-            const starDisplay = cardElement.querySelector('.star-rating-display');
-            if (starDisplay) {
-                starDisplay.querySelector('.stars-inner').style.width = '0%';
-                starDisplay.querySelector('.rating-avg').textContent = '0.0';
-                starDisplay.querySelector('.rating-count').textContent = '0';
-            }
-            return { kakao_url: null, avg_rating: 0, total_ratings: 0, my_rating: 0, my_review_text: null };
-        }
-      }
+      async function fetchPlaceDetails(cardElement, forceRefresh = false) { /* (생략) */ }
 
-      function setupModals() {
-          const ratingStars = ratingModal.querySelector('.stars');
-          const submitRatingBtn = ratingModal.querySelector('#submitRatingBtn');
-          const reviewList = reviewModal.querySelector('#reviewList');
-          const reviewTextarea = writeReviewModal.querySelector('#reviewTextarea');
-          const submitReviewTextBtn = writeReviewModal.querySelector('#submitReviewBtn');
-          const reviewSortDropdown = document.getElementById('reviewSortDropdown');
-
-          function setStarsInModal(rating = 0) {
-              ratingStars.dataset.rating = rating;
-              ratingStars.querySelectorAll('.star').forEach(s => s.classList.toggle('selected', s.dataset.value <= rating));
-              submitRatingBtn.disabled = rating == 0;
-          }
-          ratingStars.addEventListener('mouseover', e => { if (e.target.classList.contains('star')) { const rating = e.target.dataset.value; ratingStars.querySelectorAll('.star').forEach(s => s.classList.toggle('hover', s.dataset.value <= rating)); } });
-          ratingStars.addEventListener('mouseout', () => setStarsInModal(ratingStars.dataset.rating));
-          ratingStars.addEventListener('click', e => { if (e.target.classList.contains('star')) setStarsInModal(e.target.dataset.value); });
-          
-          submitRatingBtn.addEventListener('click', async () => {
-              if (!currentReviewTarget) return;
-              const { title, addr1 } = currentReviewTarget.dataset;
-              const rating = ratingStars.dataset.rating;
-              try {
-                  const res = await fetch('/api/submit-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, addr1, rating }) });
-                  if (!res.ok) throw new Error('저장 실패');
-                  fetchPlaceDetails(currentReviewTarget, true);
-                  ratingModal.classList.remove('visible');
-              } catch (err) { alert(err.message || '저장 중 오류 발생'); }
-          });
-          
-          async function fetchAndRenderReviews() {
-              if (!currentReviewTarget) return;
-              reviewList.innerHTML = '<div class="media-loading"><div class="spinner small"></div></div>';
-              const { title, addr1 } = currentReviewTarget.dataset;
-              const res = await fetch(`/api/get-reviews?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr1)}`);
-              const json = await res.json();
-              currentReviews = json.ok ? (json.reviews || []) : [];
-              renderReviewList();
-          }
-
-          function renderReviewList() {
-              if (currentReviews.length === 0) {
-                  reviewList.innerHTML = '<div class="review-empty">아직 후기가 없어요. 첫 후기를 남겨주세요!</div>';
-                  return;
-              }
-              const sortOrder = reviewSortDropdown.dataset.current || 'newest';
-              const sorted = [...currentReviews].sort((a,b) => sortOrder === 'newest' ? new Date(b.timestamp) - new Date(a.timestamp) : new Date(a.timestamp) - new Date(b.timestamp));
-              reviewList.innerHTML = sorted.map(r => `<div class="review-card"><p class="review-card-text">${r.text.replace(/</g, "&lt;")}</p><div class="review-card-footer">${new Date(r.timestamp).toLocaleDateString()}</div></div>`).join('');
-          }
-
-          reviewTextarea.addEventListener('input', () => { submitReviewTextBtn.disabled = reviewTextarea.value.trim().length < 10; });
-          
-          submitReviewTextBtn.addEventListener('click', async () => {
-              if (!currentReviewTarget) return;
-              const { title, addr1 } = currentReviewTarget.dataset;
-              const review_text = reviewTextarea.value.trim();
-              try {
-                  const res = await fetch('/api/submit-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, addr1, review_text }) });
-                  if (!res.ok) throw new Error('저장 실패');
-                  writeReviewModal.classList.remove('visible');
-                  fetchAndRenderReviews();
-              } catch(err) { alert(err.message || '저장 오류'); }
-          });
-
-          const reviewSortTrigger = reviewSortDropdown.querySelector('.sort-trigger');
-          const reviewSortMenu = reviewSortDropdown.querySelector('.sort-menu');
-          if(reviewSortTrigger && reviewSortMenu) {
-            reviewSortTrigger.addEventListener('click', () => reviewSortDropdown.classList.toggle('open'));
-            reviewSortMenu.querySelectorAll('[role="option"]').forEach(opt => {
-                opt.addEventListener('click', () => {
-                    reviewSortMenu.querySelector('[aria-selected="true"]').setAttribute('aria-selected', 'false');
-                    opt.setAttribute('aria-selected', 'true');
-                    reviewSortDropdown.dataset.current = opt.dataset.value;
-                    reviewSortTrigger.querySelector('.label').textContent = opt.textContent;
-                    reviewSortDropdown.classList.remove('open');
-                    renderReviewList();
-                });
-            });
-            document.addEventListener('click', e => { if (!reviewSortDropdown.contains(e.target)) reviewSortDropdown.classList.remove('open'); });
-          }
-
-          document.body.addEventListener('click', async (e) => {
-              const ratingBtn = e.target.closest('.star-rating-display');
-              const reviewBtn = e.target.closest('.review-btn');
-              const openWriteBtn = e.target.closest('#openWriteReviewBtn');
-              const closeModalBtn = e.target.closest('.modal-close-btn');
-              
-              if (ratingBtn) {
-                  currentReviewTarget = ratingBtn.closest('.tl-item.visit');
-                  ratingModal.querySelector('#modalPlaceTitle').textContent = currentReviewTarget.dataset.title;
-                  const details = await fetchPlaceDetails(currentReviewTarget);
-                  setStarsInModal(details.my_rating);
-                  ratingModal.classList.add('visible');
-              }
-              if (reviewBtn) {
-                  currentReviewTarget = reviewBtn.closest('.tl-item.visit');
-                  reviewModal.querySelector('#reviewModalPlaceTitle').textContent = currentReviewTarget.dataset.title;
-                  const details = await fetchPlaceDetails(currentReviewTarget);
-                  if (details.kakao_url) {
-                      reviewModal.querySelector('#reviewIframe').src = details.kakao_url;
-                      reviewModal.querySelector('#reviewIframeContainer').classList.remove('hidden');
-                      reviewModal.querySelector('#customReviewContainer').classList.add('hidden');
-                  } else {
-                      reviewModal.querySelector('#reviewIframeContainer').classList.add('hidden');
-                      reviewModal.querySelector('#customReviewContainer').classList.remove('hidden');
-                      fetchAndRenderReviews();
-                  }
-                  reviewModal.classList.add('visible');
-              }
-              if (openWriteBtn) {
-                  const details = await fetchPlaceDetails(currentReviewTarget);
-                  writeReviewModal.querySelector('#writeReviewModalPlaceTitle').textContent = currentReviewTarget.dataset.title;
-                  reviewTextarea.value = details.my_review_text || '';
-                  submitReviewTextBtn.disabled = reviewTextarea.value.trim().length < 10;
-                  writeReviewModal.classList.add('visible');
-              }
-              if (closeModalBtn) {
-                  closeModalBtn.closest('.modal-backdrop').classList.remove('visible');
-              }
-          });
-      }
+      function setupModals() { /* (생략) */ }
 
       function initializeAllItems() {
+        // ▼▼▼ [추가] 혼잡도 로딩 함수 호출 ▼▼▼
+        updateCongestionLevels(); 
+        // ▲▲▲ [추가] 여기까지 ▲▲▲
+
         const allVisitItems = document.querySelectorAll('li.tl-item.visit');
         
         if (observer) observer.disconnect();

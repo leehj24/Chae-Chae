@@ -83,6 +83,26 @@ PLACES_DF = None
 FILTER_OPTIONS = None
 CONGESTION_DF = None  # 새 전역 변수
 
+try:
+    congestion_df = pd.read_csv(
+        PATH_CONGESTION_FINAL, # <-- config.py의 변수를 사용합니다!
+        encoding="utf-8",
+        dtype={"시도": str, "시군구": str, "읍면동": str, "시간대": str}
+    )
+    print(f"✅ 혼잡도 CSV 파일 로딩 성공! (경로: {PATH_CONGESTION_FINAL})")
+except FileNotFoundError:
+    congestion_df = None
+    print(f"⚠️ 혼잡도 CSV 파일을 찾을 수 없습니다. 경로를 확인해주세요: {PATH_CONGESTION_FINAL}")
+
+def get_eup_myeon_dong(address: str) -> str | None:
+    """주소 문자열에서 읍/면/동을 추출합니다."""
+    if not isinstance(address, str):
+        return None
+    match = re.search(r'\b(\w+[읍면동])\b', address)
+    if match:
+        return match.group(1)
+    return None
+
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 # ▼▼▼ 혼잡도 최종등급 로딩/조회 로직 ▼▼▼
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
@@ -872,6 +892,42 @@ def img_proxy():
     except requests.exceptions.RequestException:
         return abort(502)
 
+@app.get("/api/congestion")
+def get_congestion():
+    """주소와 시간을 받아 해당 지역의 혼잡도 등급을 반환합니다."""
+    addr1 = request.args.get('addr1', type=str)
+    time_str = request.args.get('time', type=str) # e.g., "09:00"
+
+    if congestion_df is None or not addr1 or not time_str:
+        return {"level": "정보없음"}
+
+    # 1. 주소에서 '읍면동' 추출
+    emd = get_eup_myeon_dong(addr1)
+    if not emd:
+        return {"level": "정보없음"}
+
+    # 2. 시간 형식을 '09시' 형태로 변환
+    try:
+        hour = int(time_str.split(':')[0])
+        hour_formatted = f"{hour:02d}시"
+    except (ValueError, IndexError):
+        return {"level": "정보없음"}
+
+    # 3. 데이터프레임에서 혼잡도 검색
+    try:
+        result = congestion_df[
+            (congestion_df["읍면동"] == emd) & 
+            (congestion_df["시간대"] == hour_formatted)
+        ]
+
+        if not result.empty:
+            level = result.iloc[0]["final_level"]
+            return {"level": level}
+
+    except Exception as e:
+        print(f"❌ 혼잡도 검색 오류: {e}")
+
+    return {"level": "정보없음"}
 
 # === KakaoTalk 연동 라우트 =========================================
 @app.get("/kakaotalk/auth")
