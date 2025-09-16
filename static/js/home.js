@@ -205,10 +205,9 @@
   }
 
   // ▼▼▼ [수정] 카드 HTML 생성 함수 (점수, 태그 로직 수정) ▼▼▼
-  function cardHTML(item) {
-    const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy, firstimage } = item;
+function cardHTML(item) {
+    const { rank, title, addr1, cat1, cat3, review_score, tour_score, mapx, mapy, firstimage, user_has_uploaded } = item;
     
-    // [수정] 'item' 객체에서 점수를 가져오도록 수정
     let score = state.sort === 'review' ? item.review_score : item.tour_score;
     if (score !== null && typeof score !== 'undefined') { 
         score *= 100; 
@@ -219,24 +218,20 @@
       
     const placeholderStyle = firstimage ? `style="background-image: url('/img-proxy?u=${encodeURIComponent(firstimage)}');"` : '';
     
-    // [수정] cat1과 cat3의 모든 태그를 합친 후, 중복을 제거하고 최대 2개만 선택
     const allTags = [];
-    if (cat1) {
-      allTags.push(cat1.trim());
-    }
+    if (cat1) allTags.push(cat1.trim());
     if (cat3) {
-      const cat3Tags = (cat3 || '')
-        .split(/[,\/|]/)
-        .map(tag => tag.trim())
-        .filter(tag => tag);
+      const cat3Tags = (cat3 || '').split(/[,\/|]/).map(tag => tag.trim()).filter(tag => tag);
       allTags.push(...cat3Tags);
     }
-    
     const finalTags = [...new Set(allTags)].slice(0, 2);
     const tagsHTML = finalTags.map(tag => `<span class="chip">${tag}</span>`).join('');
 
+    // [수정] user_has_uploaded 값에 따라 'upload-locked' 클래스를 추가
+    const lockedClass = user_has_uploaded ? 'upload-locked' : '';
+
     return `
-      <article class="place-card" data-title="${title}" data-addr1="${addr1}" data-mapx="${mapx}" data-mapy="${mapy}" data-loaded="false">
+      <article class="place-card ${lockedClass}" data-title="${title}" data-addr1="${addr1}" data-mapx="${mapx}" data-mapy="${mapy}" data-loaded="false">
         <div class="rank">#${rank}</div>
         ${scoreBadgeHTML}
         <div class="carousel" aria-label="${title} 이미지 프레임">
@@ -247,9 +242,7 @@
         <div class="meta">
           <h3 class="title">${title}</h3>
           <div class="addr">${addr1 || ''}</div>
-          <div class="tags">
-            ${tagsHTML}
-          </div>
+          <div class="tags">${tagsHTML}</div>
           <div class="card-actions">
             <div class="star-rating-display" role="button" tabindex="0" aria-label="별점주기">
               <div class="stars-outer"><div class="stars-inner"></div></div>
@@ -260,7 +253,7 @@
         </div>
       </article>
     `;
-  }
+}
   // ▲▲▲ [수정 완료] ▲▲▲
   
   // --- [수정] 그리드 렌더링 함수 (지연 로딩 적용) ---

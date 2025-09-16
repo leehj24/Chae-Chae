@@ -590,6 +590,7 @@ def chat():
 @app.post("/do_generate")
 def do_generate():
     try:
+        _init_session_if_needed() # 세션 초기화 추가
         params = {
             "region": session.get("region"), "score_label": session.get("score_label"),
             "cats": session.get("cats"), "days": session.get("days"),
@@ -606,16 +607,25 @@ def do_generate():
         else:
             itinerary_df = add_congestion_to_schedule(itinerary_df, CONGESTION_DF)
             itinerary_records = _df_to_records(itinerary_df)
+            
+            # ▼▼▼ [추가] 추천 결과에 사용자의 업로드 여부를 확인하는 로직 ▼▼▼
+            user_id = session.get('user_id')
+            user_uploads = _load_user_uploads()
+
             for item in itinerary_records:
                 if item.get("title") != "이동":
+                    # firstimage 정보 추가 (기존 로직)
                     title = item.get("title", "")
                     addr1 = item.get("addr1", "")
-                    
                     place_mask = (PLACES_DF['title'].astype('object') == title) & (PLACES_DF['addr1'].astype('object') == addr1)
                     place_rows = PLACES_DF[place_mask]
-                    firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else ""
+                    item["firstimage"] = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else ""
                     
-                    item["firstimage"] = firstimage_url
+                    # 업로드 여부 정보 추가 (새 로직)
+                    key = f"{_nfc(title)}|{_nfc(addr1)}"
+                    place_uploads = user_uploads.get(key, [])
+                    item['user_has_uploaded'] = any(entry.get('user_id') == user_id for entry in place_uploads)
+            # ▲▲▲ [추가 완료] ▲▲▲
         
         # ▼▼▼ [추가] 일정 저장 및 공유 ID 생성 로직 ▼▼▼
         share_id = str(uuid.uuid4())
@@ -693,6 +703,9 @@ def uploaded_file(filename):
 @app.get("/api/places")
 def api_places():
     try:
+        # ▼▼▼ [추가] 세션을 초기화하여 user_id를 가져옵니다. ▼▼▼
+        _init_session_if_needed()
+        
         sido, cat1, cat3, query = request.args.get("sido"), request.args.get("cat1"), request.args.get("cat3"), request.args.get("q")
         filtered_df = PLACES_DF
         if sido and sido != 'all':
@@ -716,8 +729,23 @@ def api_places():
 
         view = df_sorted.iloc[start:end].copy()
         view["rank"] = range(start + 1, start + 1 + len(view))
-        cols_to_return = ["rank", "title", "addr1", "cat1", "cat3", "firstimage", "tour_score", "review_score", "mapx", "mapy"]
+
+        # ▼▼▼ [추가] 사용자의 업로드 여부를 확인하는 로직 ▼▼▼
+        user_id = session.get('user_id')
+        user_uploads = _load_user_uploads()
+        
+        def check_upload(row):
+            key = f"{_nfc(row['title'])}|{_nfc(row['addr1'])}"
+            place_uploads = user_uploads.get(key, [])
+            return any(entry.get('user_id') == user_id for entry in place_uploads)
+
+        view['user_has_uploaded'] = view.apply(check_upload, axis=1)
+        # ▲▲▲ [추가 완료] ▲▲▲
+
+        # ▼▼▼ [수정] 반환하는 컬럼 목록에 'user_has_uploaded' 추가 ▼▼▼
+        cols_to_return = ["rank", "title", "addr1", "cat1", "cat3", "firstimage", "tour_score", "review_score", "mapx", "mapy", "user_has_uploaded"]
         items_list = _df_to_records(view[[c for c in cols_to_return if c in view.columns]])
+        
         return _json({
             "ok": True, "sort_label": score_label, "sort_col": score_col,
             "total": total, "page": page, "per_page": per_page,
