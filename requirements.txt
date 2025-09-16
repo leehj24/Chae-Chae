@@ -8,3 +8,4 @@ pandas
 numpy
 tqdm
 vobject
+reportlab
