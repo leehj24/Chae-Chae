@@ -20,10 +20,10 @@ from flask import (Flask, Response, abort, flash, redirect, render_template,
                    request, send_from_directory, session, url_for)
 from flask_session import Session
 from werkzeug.utils import secure_filename
-from werkzeug.middleware.proxy_fix import ProxyFix  # ◀◀◀ 1. 이 줄을 추가하세요.
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from recommend.config import *
-import recommend.kakaotalk as kakaotalk  # ✅ 카카오톡 모듈 임포트
+import recommend.kakaotalk as kakaotalk
 import recommend.run_transit as run_transit_module
 import recommend.run_walk as run_walk_module
 
@@ -81,39 +81,26 @@ DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 PLACES_DF = None
 FILTER_OPTIONS = None
-CONGESTION_DF = None  # 새 전역 변수
-
-try:
-    congestion_df = pd.read_csv(
-        PATH_CONGESTION_FINAL, # <-- config.py의 변수를 사용합니다!
-        encoding="utf-8",
-        dtype={"시도": str, "시군구": str, "읍면동": str, "시간대": str}
-    )
-    print(f"✅ 혼잡도 CSV 파일 로딩 성공! (경로: {PATH_CONGESTION_FINAL})")
-except FileNotFoundError:
-    congestion_df = None
-    print(f"⚠️ 혼잡도 CSV 파일을 찾을 수 없습니다. 경로를 확인해주세요: {PATH_CONGESTION_FINAL}")
-
-def get_eup_myeon_dong(address: str) -> str | None:
-    """주소 문자열에서 읍/면/동을 추출합니다."""
-    if not isinstance(address, str):
-        return None
-    match = re.search(r'\b(\w+[읍면동])\b', address)
-    if match:
-        return match.group(1)
-    return None
+CONGESTION_DF = None
+CONGESTION_COORDS_DF = None
 
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-# ▼▼▼ 혼잡도 최종등급 로딩/조회 로직 ▼▼▼
+# ▼▼▼ [수정/추가] 혼잡도 최종등급 로딩/조회 로직 ▼▼▼
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-
 
 def _nfc(s: str) -> str:
     return ud.normalize("NFC", str(s or "")).strip()
 
+def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6371
+    dLat, dLon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    lat1, lat2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin(dLat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dLon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 def load_congestion_final_data(path: str) -> Optional[pd.DataFrame]:
-    """전국 혼잡도 최종 등급 파일을 로드하고 조회에 용이하게 최적화합니다."""
+    global CONGESTION_COORDS_DF
     p = Path(path)
     if not p.exists():
         print(f"⚠️ 경고: 전국 혼잡도 파일을 찾을 수 없습니다: '{path}'")
@@ -121,48 +108,51 @@ def load_congestion_final_data(path: str) -> Optional[pd.DataFrame]:
     try:
         print("🚀 전국 혼잡도 최종 등급 데이터를 로드합니다...")
         df = pd.read_csv(p, encoding='utf-8')
-        # 시도 축약키 생성
-        sido_full_to_short_map = {v: k for k, v in sido_map.items() if len(k) < len(v)}
-        sido_full_to_short_map.update({v: v for v, k in sido_map.items() if v == k})
-        df['sido_key'] = df['시도'].map(sido_full_to_short_map).fillna(df['시도'])
-        for col in ['시군구', '읍면동']:
-            if col in df.columns:
+
+        required_cols = ['시도', '시군구', '읍면동', '시간대', 'final_level', 'lat', 'lon']
+        if not all(col in df.columns for col in required_cols):
+            print(f"⛔️ {p.name} 파일에 필수 컬럼({', '.join(required_cols)})이 없어 근접 검색 기능을 비활성화합니다.")
+            CONGESTION_COORDS_DF = None
+        else:
+            for col in ['시군구', '읍면동']:
                 df[col] = df[col].apply(_nfc)
-        df.set_index(['sido_key', '시군구', '읍면동', '시간대'], inplace=True)
+            
+            coord_cols = ['시도', '시군구', '읍면동', 'lat', 'lon']
+            CONGESTION_COORDS_DF = df[coord_cols].drop_duplicates().reset_index(drop=True)
+            print(f"✅ 혼잡도 근접 검색을 위한 {len(CONGESTION_COORDS_DF):,}개 읍면동 좌표 데이터 생성 완료!")
+
+        df.set_index(['시군구', '읍면동', '시간대'], inplace=True)
         df.sort_index(inplace=True)
         print(f"✅ 전국 혼잡도 데이터 로드 완료! 총 {len(df):,}개 행.")
         return df
     except Exception as e:
         print(f"⛔️ {p.name} 파일 로드 실패: {e}")
+        traceback.print_exc()
         return None
-
 
 def parse_address_for_key(address: str) -> tuple[str | None, str | None, str | None]:
     address = _nfc(address)
     parts = address.split()
-    if not parts:
-        return None, None, None
-    candidates = [k for k in sido_map.keys() if parts[0].startswith(k)]
-    sido_key = min(candidates, key=len) if candidates else None
-    if not sido_key:
-        return None, None, None
+    if not parts: return None, None, None
+    
+    sido_key = next((s for s in sido_map if parts[0].startswith(s)), None)
+    if not sido_key: return None, None, None
+    
     norm = [p.strip('()') for p in parts[1:]]
     sigungu = next((p for p in norm if p.endswith(('시', '군', '구'))), None)
     eupmyeondong = next((p for p in norm if p.endswith(('읍', '면', '동', '가')) and p != sigungu), None)
+    
     return sido_key, sigungu, eupmyeondong
 
-
-def get_congestion_level(sido_key: str, sigungu: str, eupmyeondong: Optional[str], hour: int, df: pd.DataFrame) -> Optional[str]:
-    """최종 등급 DF에서 특정 지역/시간의 혼잡도 등급('final_level') 조회"""
-    if df is None:
-        return None
+def get_congestion_level(sigungu: str, eupmyeondong: Optional[str], hour: int, df: pd.DataFrame) -> Optional[str]:
+    if df is None: return None
     time_str = f"{hour:02d}시"
     try:
-        if sido_key and sigungu and eupmyeondong:
-            level = df.loc[(sido_key, sigungu, eupmyeondong, time_str), 'final_level']
+        if sigungu and eupmyeondong:
+            level = df.loc[(sigungu, eupmyeondong, time_str), 'final_level']
             return level if isinstance(level, str) else level.iloc[0]
-        if sido_key and sigungu:
-            rows = df.loc[(sido_key, sigungu)]
+        if sigungu:
+            rows = df.loc[sigungu]
             if not rows.empty:
                 level = rows[rows.index.get_level_values('시간대') == time_str]['final_level']
                 if not level.empty:
@@ -171,51 +161,45 @@ def get_congestion_level(sido_key: str, sigungu: str, eupmyeondong: Optional[str
     except (KeyError, IndexError, TypeError):
         return None
 
-
 def map_congestion_to_class(level: str) -> str:
-    if level == '매우 붐빔':
-        return 'very-high'
-    if level == '붐빔':
-        return 'high'
-    if level == '보통':
-        return 'medium'
-    if level == '여유':
-        return 'low'
-    return 'unknown'
-
+    return {'매우 붐빔': 'very-high', '붐빔': 'high', '보통': 'medium', '여유': 'low'}.get(level, 'unknown')
 
 def add_congestion_to_schedule(schedule_df: pd.DataFrame, congestion_df: pd.DataFrame) -> pd.DataFrame:
     if congestion_df is None:
         schedule_df['congestion_level'], schedule_df['congestion_class'] = '정보 없음', 'unknown'
         return schedule_df
+        
     levels, classes = [], []
     for _, row in schedule_df.iterrows():
         if row.get('title') == '이동':
             levels.append(None)
             classes.append(None)
             continue
+            
         addr, time_str = row.get('addr1'), row.get('start_time')
         if not all(isinstance(i, str) and i for i in [addr, time_str]):
             levels.append('정보 없음')
             classes.append('unknown')
             continue
-        sido_key, sigungu, eupmyeondong = parse_address_for_key(addr)
+
+        _, sigungu, eupmyeondong = parse_address_for_key(addr)
         level_text = '정보 없음'
-        if sido_key and sigungu:
+        if sigungu:
             try:
                 hour = int(time_str.split(':')[0])
-                level_text = get_congestion_level(sido_key, sigungu, eupmyeondong, hour, congestion_df) or '정보 없음'
+                level_text = get_congestion_level(sigungu, eupmyeondong, hour, congestion_df) or '정보 없음'
             except (ValueError, TypeError):
                 pass
+        
         levels.append(level_text)
         classes.append(map_congestion_to_class(level_text))
+        
     schedule_df['congestion_level'] = levels
     schedule_df['congestion_class'] = classes
     return schedule_df
+
 # ░░░░░░ 혼잡도 관련 끝 ░░░░░░
 
-
-# --- 데이터 로딩 및 최적화 ---
 def _read_csv_robust(path: str, usecols: Optional[List[str]] = None) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
         try:
@@ -224,37 +208,24 @@ def _read_csv_robust(path: str, usecols: Optional[List[str]] = None) -> pd.DataF
             pass
     raise IOError(f"Failed to read CSV file with common encodings: {path}")
 
-
 def _pick_column(df_cols: List[str], *names: str) -> str | None:
     low_cols = {c.lower().strip(): c for c in df_cols}
     for n in names:
-        if n.lower() in low_cols:
-            return low_cols[n.lower()]
+        if n.lower() in low_cols: return low_cols[n.lower()]
     for c in df_cols:
         cl = c.lower().strip()
         for n in names:
-            if n.lower() in cl:
-                return c
+            if n.lower() in cl: return c
     return None
-
 
 def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     print("🚀 앱 시작! 관광지 데이터를 메모리에 로드하고 최적화합니다...")
     required_cols_map = {
-        "title": ["title"],
-        "addr1": ["addr1"],
-        "cat1": ["cat1"],
-        "cat3": ["cat3"],
-        "tour_score": ["tour_score"],
-        "review_score": ["review_score"],
-        "mapx": ["mapx"],
-        "mapy": ["mapy"],
-        "firstimage": ["firstimage"],
+        "title": ["title"], "addr1": ["addr1"], "cat1": ["cat1"], "cat3": ["cat3"],
+        "tour_score": ["tour_score"], "review_score": ["review_score"],
+        "mapx": ["mapx"], "mapy": ["mapy"], "firstimage": ["firstimage"],
     }
-    try:
-        temp_df_cols = pd.read_csv(PATH_TMF, encoding='utf-8', nrows=0).columns.tolist()
-    except Exception:
-        temp_df_cols = pd.read_csv(PATH_TMF, encoding='cp949', nrows=0).columns.tolist()
+    temp_df_cols = pd.read_csv(PATH_TMF, encoding='utf-8', nrows=0).columns.tolist()
 
     cols_to_load, final_col_names = {}, []
     for key, candidates in required_cols_map.items():
@@ -268,8 +239,7 @@ def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     df = _read_csv_robust(PATH_TMF, usecols=list(set(final_col_names)))
     df = df.rename(columns={v: k for k, v in cols_to_load.items()})
     for c in ("cat3", "firstimage"):
-        if c not in df.columns:
-            df[c] = ""
+        if c not in df.columns: df[c] = ""
 
     df['title'], df['addr1'] = df['title'].astype(str).str.strip(), df['addr1'].astype(str).str.strip()
     df = df.dropna(subset=['title', 'addr1'])
@@ -289,7 +259,7 @@ def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
 
     print("✅ 데이터 타입 최적화 완료!")
     df.info(memory_usage='deep')
-
+    
     sidos = sorted([s for s in df['sido'].cat.categories if s])
     cat1s = sorted([c for c in df['cat1'].cat.categories if c])
 
@@ -298,26 +268,20 @@ def load_places_data() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
         lambda tags: all_cat3s.update(t.strip() for t in tags if t.strip())
     )
     cat3s = sorted(list(all_cat3s))
-
+    
     filter_opts = {"sidos": sidos, "cat1s": cat1s, "cat3s": cat3s}
     print(f"✅ 데이터 로드 및 최적화 최종 완료! 총 {len(df):,}개의 장소.")
     return df, filter_opts
 
-
-# --- 서버 시작 시 데이터 로딩 실행 ---
 PLACES_DF, FILTER_OPTIONS = load_places_data()
-CONGESTION_DF = load_congestion_final_data(PATH_CONGESTION_FINAL)  # 최종 혼잡도 파일 로드
+CONGESTION_DF = load_congestion_final_data(PATH_CONGESTION_FINAL)
 
-
-# --- 기존 유틸리티 함수들 ---
 def _sort_key_from_param(s: str) -> tuple[str, str]:
     s = (s or "").strip().lower()
     return ("review_score", "인기도 지수") if s in {"popular", "review", "review_score", "인기도"} else ("tour_score", "관광 지수")
 
-
 def _trim_msgs():
     session["messages"] = session.get("messages", [])[-MAX_MSGS:]
-
 
 def _json(payload: Dict[str, Any], status: int = 200) -> Response:
     return app.response_class(
@@ -326,35 +290,27 @@ def _json(payload: Dict[str, Any], status: int = 200) -> Response:
         mimetype="application/json"
     )
 
-
 def _df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     clean = df.replace({np.nan: None})
     recs = clean.to_dict(orient="records")
     for r in recs:
         for k, v in list(r.items()):
-            if isinstance(v, np.generic):
-                r[k] = v.item()
+            if isinstance(v, np.generic): r[k] = v.item()
     return recs
 
-
 def _init_session_if_needed():
-    if "state" not in session:
-        session["state"] = "지역"
+    if "state" not in session: session["state"] = "지역"
     if "messages" not in session or not session["messages"]:
         session["messages"] = [{"sender": "bot", "html": BOT_PROMPTS["지역"]}]
-    if 'user_id' not in session:
-        session['user_id'] = str(uuid.uuid4())
-
+    if 'user_id' not in session: session['user_id'] = str(uuid.uuid4())
 
 def _allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-
 def _load_user_reviews():
     with _USER_REVIEWS_LOCK:
         p = Path(PATH_USER_REVIEWS)
-        if not p.exists():
-            return {}
+        if not p.exists(): return {}
         try:
             mtime = p.stat().st_mtime
             if _USER_REVIEWS_CACHE["data"] is not None and _USER_REVIEWS_CACHE["mtime"] == mtime:
@@ -365,7 +321,6 @@ def _load_user_reviews():
         except (json.JSONDecodeError, IOError):
             return {}
 
-
 def _save_user_reviews(data):
     with _USER_REVIEWS_LOCK:
         try:
@@ -374,12 +329,10 @@ def _save_user_reviews(data):
         except Exception as e:
             print(f"❌ 에러: 사용자 후기 파일 저장 실패 - {e}")
 
-
 def _load_user_uploads():
     with _USER_UPLOADS_LOCK:
         p = Path(PATH_USER_UPLOADS)
-        if not p.exists():
-            return {}
+        if not p.exists(): return {}
         try:
             mtime = p.stat().st_mtime
             if _USER_UPLOADS_CACHE["data"] is not None and _USER_UPLOADS_CACHE["mtime"] == mtime:
@@ -390,7 +343,6 @@ def _load_user_uploads():
         except (json.JSONDecodeError, IOError):
             return {}
 
-
 def _save_user_uploads(data):
     with _USER_UPLOADS_LOCK:
         try:
@@ -399,30 +351,23 @@ def _save_user_uploads(data):
         except Exception as e:
             print(f"❌ 에러: 사용자 업로드 파일 저장 실패 - {e}")
 
-
 def _load_image_cache() -> dict:
     global _IMAGE_CACHE
-    if _IMAGE_CACHE is not None:
-        return _IMAGE_CACHE
+    if _IMAGE_CACHE is not None: return _IMAGE_CACHE
     p = Path(PATH_KAKAO_IMAGE_CACHE)
-    if not p.exists():
-        _IMAGE_CACHE = {}
-        return _IMAGE_CACHE
+    if not p.exists(): _IMAGE_CACHE = {}; return _IMAGE_CACHE
     try:
         _IMAGE_CACHE = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, IOError):
         _IMAGE_CACHE = {}
     return _IMAGE_CACHE
 
-
 def _save_image_cache():
-    if _IMAGE_CACHE is None:
-        return
+    if _IMAGE_CACHE is None: return
     try:
         Path(PATH_KAKAO_IMAGE_CACHE).write_text(json.dumps(_IMAGE_CACHE, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"❌ 에러: 이미지 캐시 파일 저장 실패 - {e}")
-
 
 def _ensure_session():
     global _SESSION
@@ -432,27 +377,22 @@ def _ensure_session():
     if KAKAO_API_KEY and "Authorization" not in _SESSION.headers:
         _SESSION.headers.update({"Authorization": f"KakaoAK {KAKAO_API_KEY}"})
 
-
 def _addr_region_tokens(addr1: str) -> List[str]:
     cand = re.findall(r"\b[\w가-힣]+(?:시|군|구)\b", _nfc(addr1)) or re.split(r"[,\s]+", _nfc(addr1))
     return [w for w in cand if w][:3]
 
-
 def _kakao_image_search(query: str, size: int = 4) -> List[str]:
-    if not KAKAO_API_KEY:
-        return []
+    if not KAKAO_API_KEY: return []
     _ensure_session()
     try:
         params = {"query": query, "sort": "accuracy", "page": 1, "size": max(1, min(10, int(size)))}
         r = _SESSION.get("https://dapi.kakao.com/v2/search/image", params=params, timeout=4)
-        if not r.ok:
-            return []
+        if not r.ok: return []
         docs = r.json().get("documents", []) or []
         urls = [d.get("image_url") for d in docs if str(d.get("image_url") or "").startswith("http")]
         return [u for u in urls if len(u) < 2000]
     except Exception:
         return []
-
 
 def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
     cache = _load_image_cache()
@@ -461,14 +401,12 @@ def _images_for_place(title: str, addr1: str, max_n: int = 4) -> List[str]:
         return cache[key].get("urls", [])[:max_n]
     return []
 
-
 def _fetch_and_cache_images_live(title: str, addr1: str) -> list[str]:
     key, query = f"{_nfc(title)}|{_nfc(addr1)}", " ".join([title, *_addr_region_tokens(addr1)])
     urls, cache = _kakao_image_search(query, size=4), _load_image_cache()
     cache[key] = {"q": query, "urls": urls, "ts": int(datetime.now().timestamp())}
     _save_image_cache()
     return urls
-
 
 def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None, max_n: int = 4, include_user_uploads: bool = False, auto_fetch_if_needed: bool = False) -> List[str]:
     u = str(firstimage_url or '').strip()
@@ -487,10 +425,8 @@ def _get_all_images_for_place(title: str, addr1: str, firstimage_url: str | None
             ordered.append(img_url)
     return ordered[:max_n]
 
-
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
-    if not KAKAO_API_KEY:
-        return None
+    if not KAKAO_API_KEY: return None
     _ensure_session()
     try:
         if addr1:
@@ -507,19 +443,15 @@ def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, 
         pass
     return None
 
-
 def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
-    if not KAKAO_API_KEY or not x or not y:
-        return None
+    if not KAKAO_API_KEY or not x or not y: return None
     _ensure_session()
     params = {"query": title, "x": x, "y": y, "radius": 500, "sort": "accuracy", "size": 5}
     try:
         res = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", params=params, timeout=3)
-        if not res.ok:
-            return None
+        if not res.ok: return None
         docs = res.json().get("documents", [])
-        if not docs:
-            return None
+        if not docs: return None
         clean_title = re.sub(r'[\(\)\[\]\s]', '', title)
         for place in docs:
             place_name = re.sub(r'[\(\)\[\]\s]', '', place.get("place_name", ""))
@@ -528,7 +460,6 @@ def _get_kakao_place_url(title: str, x: str, y: str) -> Optional[str]:
         return docs[0].get("place_url")
     except requests.exceptions.RequestException:
         return None
-
 
 def start_self_pinging():
     def self_ping_task():
@@ -547,18 +478,15 @@ def start_self_pinging():
                 print(f"❌ self-ping: 오류 발생: {e}")
     threading.Thread(target=self_ping_task, daemon=True).start()
 
-
 # --- 라우트(Routes) ---
 @app.get("/")
 def home():
     return render_template("home.html")
 
-
 @app.get("/chat")
 def index():
     _init_session_if_needed()
     return render_template("index.html", kakao_js_key=KAKAO_JS_KEY)
-
 
 @app.post("/chat")
 def chat():
@@ -573,7 +501,6 @@ def chat():
             messages.append({"sender": "user", "text": region})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["점수"]})
             session["state"] = "점수"
-
     elif state == "점수":
         score = request.form.get("score", "").strip()
         if score in {"관광지수", "인기도지수"}:
@@ -581,7 +508,6 @@ def chat():
             messages.append({"sender": "user", "text": score})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["테마"]})
             session["state"] = "테마"
-
     elif state == "테마":
         themes_str = request.form.get("themes", "").strip()
         if themes_str:
@@ -590,7 +516,6 @@ def chat():
             messages.append({"sender": "user", "text": ", ".join(themes)})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["기간"]})
             session["state"] = "기간"
-
     elif state == "기간":
         start_date_str, end_date_str = request.form.get("start_date"), request.form.get("end_date")
         try:
@@ -598,16 +523,13 @@ def chat():
             end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
             days = (end - start).days + 1
             if 1 <= days <= 100:
-                session["start_date"] = start_date_str
-                session["end_date"] = end_date_str
-                session["days"] = days
+                session["start_date"], session["end_date"], session["days"] = start_date_str, end_date_str, days
                 user_text = f"{start_date_str} ~ {end_date_str} (총 {days}일)"
                 messages.append({"sender": "user", "text": user_text})
                 messages.append({"sender": "bot", "html": BOT_PROMPTS["이동수단"]})
                 session["state"] = "이동수단"
         except (ValueError, TypeError):
             pass
-
     elif state == "이동수단":
         transport = request.form.get("transport", "").strip()
         if transport in {"walk", "transit"}:
@@ -616,20 +538,19 @@ def chat():
             messages.append({"sender": "user", "text": transport_text})
             messages.append({"sender": "bot", "html": BOT_PROMPTS["실행중"]})
             session["state"] = "실행중"
-
+    
     session["messages"] = messages
     _trim_msgs()
     return redirect(url_for("index"))
 
+# app.py
 
 @app.post("/do_generate")
 def do_generate():
     try:
         params = {
-            "region": session.get("region"),
-            "score_label": session.get("score_label"),
-            "cats": session.get("cats"),
-            "days": session.get("days"),
+            "region": session.get("region"), "score_label": session.get("score_label"),
+            "cats": session.get("cats"), "days": session.get("days"),
             "transport_mode": session.get("transport_mode")
         }
         if not all(params.values()):
@@ -638,10 +559,29 @@ def do_generate():
         engine = run_walk_module if params["transport_mode"] == "walk" else run_transit_module
         itinerary_df = engine.run(**params)
 
-        if not itinerary_df.empty:
+        if itinerary_df.empty:
+            itinerary_records = []
+        else:
             itinerary_df = add_congestion_to_schedule(itinerary_df, CONGESTION_DF)
+            itinerary_records = _df_to_records(itinerary_df)
 
-        session["itinerary"] = _df_to_records(itinerary_df)
+            # ▼▼▼ [핵심 변경] ▼▼▼
+            # 이미지와 좌표를 미리 가져오는 느린 로직을 모두 삭제하고,
+            # 'firstimage' (대표 이미지) 정보만 추가합니다.
+            # 이 대표 이미지는 로딩 전 placeholder 배경으로 사용됩니다.
+            for item in itinerary_records:
+                if item.get("title") != "이동":
+                    title = item.get("title", "")
+                    addr1 = item.get("addr1", "")
+                    
+                    place_mask = (PLACES_DF['title'].astype('object') == title) & (PLACES_DF['addr1'].astype('object') == addr1)
+                    place_rows = PLACES_DF[place_mask]
+                    firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else ""
+                    
+                    item["firstimage"] = firstimage_url
+            # ▲▲▲ [변경 완료] ▲▲▲
+
+        session["itinerary"] = itinerary_records
         session["state"] = "완료"
         messages = session.get("messages", [])
         completion_html = "완료! 추천 일정을 아래에 표시했어요."
@@ -658,26 +598,19 @@ def do_generate():
         session["messages"].append({"sender": "bot", "html": f"<strong>오류 발생:</strong><br><pre>{e}</pre>"})
         return _json({"ok": False, "error": str(e)}, 500)
 
-
-# --- 리스트/이미지/리뷰 API ---
+# --- API Routes ---
 @app.get("/reset_chat")
 def reset_chat():
     session.clear()
     return redirect(url_for("index"))
-
 
 @app.get("/go_back")
 def go_back():
     _init_session_if_needed()
     current_state = session.get("state")
     state_flow = {
-        "점수": "지역",
-        "테마": "점수",
-        "기간": "테마",
-        "이동수단": "기간",
-        "실행중": "이동수단",
-        "완료": "이동수단",
-        "오류": "이동수단"
+        "점수": "지역", "테마": "점수", "기간": "테마", "이동수단": "기간",
+        "실행중": "이동수단", "완료": "이동수단", "오류": "이동수단"
     }
     prev_state = state_flow.get(current_state)
     if prev_state:
@@ -689,7 +622,6 @@ def go_back():
         session.clear()
     return redirect(url_for("index"))
 
-
 @app.get("/api/filter-options")
 def api_filter_options():
     try:
@@ -698,11 +630,9 @@ def api_filter_options():
         traceback.print_exc()
         return _json({"ok": False, "error": str(e)}, 500)
 
-
 @app.get("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
-
 
 @app.post("/api/upload-image")
 def upload_image():
@@ -729,7 +659,6 @@ def upload_image():
 
     all_images = _get_all_images_for_place(title, addr1, firstimage_url, include_user_uploads=True)
     return _json({"ok": True, "images": all_images})
-
 
 @app.get("/api/places")
 def api_places():
@@ -760,20 +689,14 @@ def api_places():
         cols_to_return = ["rank", "title", "addr1", "cat1", "cat3", "firstimage", "tour_score", "review_score", "mapx", "mapy"]
         items_list = _df_to_records(view[[c for c in cols_to_return if c in view.columns]])
         return _json({
-            "ok": True,
-            "sort_label": score_label,
-            "sort_col": score_col,
-            "total": total,
-            "page": page,
-            "per_page": per_page,
-            "total_pages": total_pages,
-            "items": items_list
+            "ok": True, "sort_label": score_label, "sort_col": score_col,
+            "total": total, "page": page, "per_page": per_page,
+            "total_pages": total_pages, "items": items_list
         })
     except Exception as e:
         print("❌ API Error in /api/places:")
         traceback.print_exc()
         return _json({"ok": False, "error": str(e)}, 500)
-
 
 @app.get("/api/place-media")
 def api_place_media():
@@ -781,17 +704,25 @@ def api_place_media():
     if not title or not addr1:
         return _json({"ok": False, "error": "title and addr1 are required."}, 400)
 
+    # 데이터베이스에서 장소의 대표 이미지 URL 가져오기
     place_mask = (PLACES_DF['title'].astype('object') == title) & (PLACES_DF['addr1'].astype('object') == addr1)
     place_rows = PLACES_DF[place_mask]
     firstimage_url = place_rows.iloc[0]['firstimage'] if not place_rows.empty and 'firstimage' in place_rows.columns else None
 
+    # 모든 이미지(사용자 업로드 포함, 없으면 실시간 조회) 가져오기
     images = _get_all_images_for_place(title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
+    
+    # 카카오 API로 지도 좌표 가져오기
     coords = _kakao_geocode_coords(title, addr1)
+    
+    # 최종적으로 필요한 모든 미디어 정보를 JSON으로 묶어서 전달
     payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords:
         payload["coords"] = {"y": coords[0], "x": coords[1]}
+    else:
+        payload["coords"] = None
+        
     return _json(payload)
-
 
 @app.get("/api/place-details")
 def api_place_details():
@@ -817,14 +748,9 @@ def api_place_details():
     my_review_text = my_review_data.get('text') if my_review_data else None
 
     return _json({
-        "ok": True,
-        "kakao_url": kakao_url,
-        "avg_rating": avg_rating,
-        "total_ratings": total_ratings,
-        "my_rating": my_rating,
-        "my_review_text": my_review_text
+        "ok": True, "kakao_url": kakao_url, "avg_rating": avg_rating,
+        "total_ratings": total_ratings, "my_rating": my_rating, "my_review_text": my_review_text
     })
-
 
 @app.get("/api/get-reviews")
 def get_reviews():
@@ -836,13 +762,11 @@ def get_reviews():
     place_reviews_data = reviews_db.get(key, {}).get("reviews", {})
     return _json({"ok": True, "reviews": list(place_reviews_data.values())})
 
-
 @app.post("/api/submit-review")
 def api_submit_review():
     _init_session_if_needed()
     data = request.json
-    title, addr1 = _nfc(data.get("title", "")), _nfc(data.get("addr1", ""))
-    rating = data.get("rating")
+    title, addr1, rating = _nfc(data.get("title", "")), _nfc(data.get("addr1", "")), data.get("rating")
     review_text = (data.get("review_text") or "").strip()
     if not title or not addr1:
         return _json({"ok": False, "error": "필수 정보가 누락되었습니다."}, 400)
@@ -854,8 +778,7 @@ def api_submit_review():
     if rating is not None:
         try:
             rating_val = int(rating)
-            if not (0 <= rating_val <= 5):
-                raise ValueError()
+            if not (0 <= rating_val <= 5): raise ValueError()
             if rating_val == 0 and user_id in reviews_db[key].get("ratings", {}):
                 del reviews_db[key]["ratings"][user_id]
             elif rating_val > 0:
@@ -866,20 +789,16 @@ def api_submit_review():
     if review_text:
         review_id = next((rid for rid, r in reviews_db[key].get("reviews", {}).items() if r.get('user_id') == user_id), str(uuid.uuid4()))
         reviews_db[key].setdefault("reviews", {})[review_id] = {
-            "user_id": user_id,
-            "text": review_text,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "user_id": user_id, "text": review_text, "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     _save_user_reviews(reviews_db)
     return _json({"ok": True, "message": "후기가 저장되었습니다."})
 
-
 @app.get("/img-proxy")
 def img_proxy():
     url = request.args.get("u")
-    if not url or not url.startswith("http"):
-        return abort(400)
+    if not url or not url.startswith("http"): return abort(400)
     try:
         _ensure_session()
         r = _SESSION.get(url, stream=True, timeout=10, headers={"Referer": ""})
@@ -894,67 +813,71 @@ def img_proxy():
 
 @app.get("/api/congestion")
 def get_congestion():
-    """주소와 시간을 받아 해당 지역의 혼잡도 등급을 반환합니다."""
     addr1 = request.args.get('addr1', type=str)
-    time_str = request.args.get('time', type=str) # e.g., "09:00"
+    time_str = request.args.get('time', type=str)
 
-    if congestion_df is None or not addr1 or not time_str:
-        return {"level": "정보없음"}
-
-    # 1. 주소에서 '읍면동' 추출
-    emd = get_eup_myeon_dong(addr1)
-    if not emd:
-        return {"level": "정보없음"}
-
-    # 2. 시간 형식을 '09시' 형태로 변환
+    if CONGESTION_DF is None or not addr1 or not time_str:
+        return _json({"level": "정보없음"})
     try:
         hour = int(time_str.split(':')[0])
-        hour_formatted = f"{hour:02d}시"
     except (ValueError, IndexError):
-        return {"level": "정보없음"}
+        return _json({"level": "정보없음"})
 
-    # 3. 데이터프레임에서 혼잡도 검색
-    try:
-        result = congestion_df[
-            (congestion_df["읍면동"] == emd) & 
-            (congestion_df["시간대"] == hour_formatted)
-        ]
+    _, sigungu, eupmyeondong = parse_address_for_key(addr1)
+    if sigungu:
+        level = get_congestion_level(sigungu, eupmyeondong, hour, CONGESTION_DF)
+        if level:
+            return _json({"level": level})
 
-        if not result.empty:
-            level = result.iloc[0]["final_level"]
-            return {"level": level}
+    if CONGESTION_COORDS_DF is None or CONGESTION_COORDS_DF.empty:
+        return _json({"level": "정보없음"})
 
-    except Exception as e:
-        print(f"❌ 혼잡도 검색 오류: {e}")
+    target_coords = _kakao_geocode_coords(query="", addr1=addr1)
+    if not target_coords:
+        return _json({"level": "정보없음"})
+    target_lat, target_lon = target_coords
 
-    return {"level": "정보없음"}
+    coords_df = CONGESTION_COORDS_DF.copy()
+    coords_df['distance_km'] = coords_df.apply(
+        lambda row: haversine(target_lat, target_lon, row['lat'], row['lon']),
+        axis=1
+    )
+    
+    sorted_coords = coords_df.sort_values('distance_km')
+
+    for radius in [5, 10, 15, 20]:
+        nearby_places = sorted_coords[sorted_coords['distance_km'] <= radius]
+        if not nearby_places.empty:
+            closest = nearby_places.iloc[0]
+            level = get_congestion_level(
+                sigungu=closest['시군구'],
+                eupmyeondong=closest['읍면동'],
+                hour=hour,
+                df=CONGESTION_DF
+            )
+            if level:
+                return _json({"level": level})
+
+    return _json({"level": "정보없음"})
 
 # === KakaoTalk 연동 라우트 =========================================
 @app.get("/kakaotalk/auth")
 def kakao_auth():
-    """사용자를 카카오 인증 URL로 리디렉션합니다."""
     if not KAKAO_API_KEY:
         flash("카카오톡 API 키가 설정되지 않았습니다.")
         return redirect(url_for('index'))
-
     redirect_uri = url_for('kakao_oauth_callback', _external=True)
-
-    # ▼▼▼ [핵심 수정] 맨 뒤에 &scope=talk_message 를 추가합니다. ▼▼▼
     auth_url = (
         f"https://kauth.kakao.com/oauth/authorize?"
         f"response_type=code&client_id={KAKAO_API_KEY}&redirect_uri={redirect_uri}"
-        f"&scope=talk_message"  # <--- 이 줄을 추가하세요!
+        f"&scope=talk_message"
     )
     return redirect(auth_url)
 
-
-
 @app.get("/kakaotalk/callback")
 def kakao_oauth_callback():
-    """카카오 인증 후 콜백을 처리하고 메시지를 전송합니다."""
     code = request.args.get('code')
     error_description = request.args.get('error_description')
-
     if not code:
         flash(f"카카오톡 연동에 실패했습니다: {error_description or '사용자가 동의하지 않았습니다.'}", "error")
         return redirect(url_for('index'))
@@ -970,13 +893,9 @@ def kakao_oauth_callback():
         return redirect(url_for('index'))
 
     chat_page_url = url_for('index', _external=True)
-
-    # ✅ [디버깅 코드 추가] 
-    # 생성된 URL이 실제로 어떤 값인지 터미널/로그에 출력해서 확인합니다.
     print(f"🚀 생성된 채팅 페이지 URL: {chat_page_url}")
 
     success = kakaotalk.send_message_to_me(access_token, itinerary, chat_page_url)
-
     if success:
         flash("카카오톡 메시지를 성공적으로 보냈습니다!", "success")
         print("✅ 카카오톡 메시지 전송 성공!")
@@ -987,7 +906,6 @@ def kakao_oauth_callback():
     return redirect(url_for('index'))
 
 # ======================================================================
-
 
 if __name__ == "__main__":
     start_self_pinging()
