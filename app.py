@@ -20,6 +20,7 @@ from flask import (Flask, Response, abort, flash, redirect, render_template,
                    request, send_from_directory, session, url_for)
 from flask_session import Session
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix  # ◀◀◀ 1. 이 줄을 추가하세요.
 
 from recommend.config import *
 import recommend.kakaotalk as kakaotalk  # ✅ 카카오톡 모듈 임포트
@@ -29,6 +30,8 @@ import recommend.run_walk as run_walk_module
 # --- Flask 앱 설정 ---
 BASE_DIR = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"), static_folder=str(BASE_DIR / "static"))
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-key-for-testing")
 UPLOAD_FOLDER = str(BASE_DIR / "uploads")
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
