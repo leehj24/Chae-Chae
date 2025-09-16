@@ -5,8 +5,99 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채 – 추천 결과</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=14" />
-</head>
+
+  <style>
+    .custom-alert-backdrop {
+      position: fixed;
+      inset: 0;
+      background-color: rgba(15, 23, 42, 0.5);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .2s ease, visibility .2s ease;
+    }
+    .custom-alert-backdrop.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+    .custom-alert-box {
+      background: var(--panel, #ffffff);
+      border-radius: 20px;
+      padding: 28px 32px;
+      width: 90%;
+      max-width: 420px;
+      box-shadow: var(--shadow, 0 10px 26px rgba(15,23,42,.08));
+      transform: scale(0.95);
+      transition: transform .2s ease;
+      text-align: center;
+    }
+    .custom-alert-backdrop.visible .custom-alert-box {
+      transform: scale(1);
+    }
+    .custom-alert-icon {
+      font-size: 2.5rem;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+    .custom-alert-message {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text, #0f172a);
+      line-height: 1.6;
+      margin-bottom: 20px;
+      white-space: pre-wrap; /* 줄바꿈이 적용되도록 설정 */
+    }
+    .custom-alert-close-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: 700;
+      padding: 10px 18px;
+      border-radius: 12px;
+      border: none;
+      background-color: var(--brand, #3b82f6);
+      color: white;
+      transition: opacity 0.2s ease;
+    }
+    .custom-alert-close-btn:hover {
+      opacity: 0.85;
+    }
+    /* 성공 메시지 스타일 */
+    .custom-alert-box.success .custom-alert-close-btn {
+      background-color: #2563eb; /* 좀 더 진한 파란색 */
+    }
+    /* 에러 메시지 스타일 */
+    .custom-alert-box.error {
+      border-top: 5px solid #ef4444;
+    }
+    .custom-alert-box.error .custom-alert-icon {
+      color: #ef4444;
+    }
+    .custom-alert-box.error .custom-alert-close-btn {
+      background-color: #ef4444;
+    }
+  </style>
+  </head>
 <body>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% set category, message = messages[0] %}
+      <div id="custom-alert-backdrop" class="custom-alert-backdrop">
+        <div class="custom-alert-box {{ category }}">
+          <div class="custom-alert-icon">
+            {{ '✅' if category == 'success' else '⚠️' }}
+          </div>
+          <p class="custom-alert-message">{{ message }}</p>
+          <button id="custom-alert-close" class="custom-alert-close-btn">확인</button>
+        </div>
+      </div>
+    {% endif %}
+  {% endwith %}
   {% set state = session.get('state', '지역') %}
 
   <header class="topbar">
@@ -26,7 +117,10 @@
 
   <main class="chat-page">
     <div class="chat-container">
-      <section id="chat-window" class="chat-window" data-state="{{ state }}">
+      <section id="chat-window" class="chat-window"
+         data-state="{{ state }}"
+         data-start="{{ session.get('start_date','') }}"
+         data-end="{{ session.get('end_date','') }}">
         {% for msg in session.get('messages', []) %}
           <div class="msg {{ 'user' if msg.sender == 'user' else 'bot' }}">
             <div class="bubble">
@@ -39,6 +133,10 @@
           {% set itin = session.get('itinerary', []) %}
           {% set groups = (itin|groupby('day'))|list %}
           {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️', '문화':'🎭'} %}
+          <div class="result-toolbar">
+            <a class="primary-btn small" href="{{ url_for('kakao_auth') }}">카톡 메시지로 보내기</a>
+            <span class="muted" style="font-size:.9rem;">카드방식 일정 메시지 나에게 보내기</span>
+          </div>
           <div class="day-stack">
             {% for day, rows in groups %}
               {% set rows = rows|list %}
@@ -60,21 +158,15 @@
                         <div class="tl-text-content">
                           <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
                           {% if not is_move %}
-                            {# ▼▼▼ [핵심 수정] h4 태그 한 줄을 아래 코드로 교체하세요. ▼▼▼ #}
                             <h4 class="tl-title">
                               <span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>
                               {{ r.title }}
-                              {# ✅ 항상 출력. 없으면 '정보 없음', 클래스 없으면 'unknown' #}
                               {% set ctext = r.congestion_level or '정보 없음' %}
                               <span class="congestion-text congestion-{{ r.congestion_class or 'unknown' }}">{{ ctext }}</span>
                             </h4>
-
-                            {# ▲▲▲ [핵심 수정] 여기까지 입니다. ▲▲▲ #}
-
                             <div class="addr">{{ r.addr1 }}</div>
                             <div class="tags">
                               {% if r.cat1 %}<span class="chip">{{ r.cat1 }}</span>{% endif %}
-                              
                               {% if r.cat3 %}
                                 {% for tag in r.cat3.replace('/',',').replace('|',',').split(',')|map('trim')|list %}
                                   {% if tag and loop.index <= 2 %}
@@ -181,7 +273,6 @@
       </footer>
     </div>
   </div>
-
   <div id="reviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle">
     <div class="modal-content wide">
         <header class="modal-header">
@@ -209,7 +300,6 @@
         </div>
     </div>
   </div>
-
   <div id="writeReviewModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="writeReviewModalTitle">
     <div class="modal-content">
         <header class="modal-header">
@@ -229,6 +319,7 @@
     </div>
   </div>
 
+
   <script src="{{ url_for('static', filename='js/app.js') }}?v=5"></script>
   
   {% if kakao_js_key %}
@@ -237,10 +328,36 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
+      // ▼▼▼ [추가] 커스텀 팝업창을 제어하는 JavaScript ▼▼▼
+      const alertBackdrop = document.getElementById('custom-alert-backdrop');
+      if (alertBackdrop) {
+        const closeBtn = document.getElementById('custom-alert-close');
+        
+        const closeAlert = () => {
+          alertBackdrop.classList.remove('visible');
+        };
+
+        // 팝업창을 띄웁니다.
+        setTimeout(() => {
+          alertBackdrop.classList.add('visible');
+        }, 100);
+
+        // 닫기 버튼 또는 배경 클릭 시 팝업을 닫습니다.
+        closeBtn.addEventListener('click', closeAlert);
+        alertBackdrop.addEventListener('click', (e) => {
+          if (e.target === alertBackdrop) {
+            closeAlert();
+          }
+        });
+      }
+      // ▲▲▲ [추가] 여기까지 ▲▲▲
+
       const chatWindow = document.getElementById('chat-window');
       if (!chatWindow || chatWindow.dataset.state !== '완료' || window.resultsRendererInitialized) return;
       window.resultsRendererInitialized = true;
 
+      // ...(이하 기존 JavaScript 코드 생략)...
+      
       let observer;
 
       window.handleImgError = function(e) {

@@ -30,6 +30,8 @@ USE_ODSay = True # True: 실제대중교통경로시간 Flase: 직선거리*1.4�
 # ░░ Kakao API 키 ░░
 # REST API 키 (서버 전용 — 절대 프론트 노출 금지)
 KAKAO_API_KEY = os.environ.get("KAKAO_API_KEY", "") # 대중교통 매핑용 카카오 api
+KAKAO_TEMPLATE_ID = 124353
+
 #대중교통 시간계산 api
 ODSAY_API_KEY = os.environ.get("ODSAY_API_KEY", "")
 

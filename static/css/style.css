@@ -321,3 +321,14 @@ body{
   border-color: #ffdde0;
   color: #ef4444;
 }
+
+/* 결과 상단 캘린더 버튼 툴바 */
+.result-toolbar{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin: 8px 0 16px;
+}
+
+
+.export-toolbar{display:flex;gap:8px;margin:8px 0 16px;}
