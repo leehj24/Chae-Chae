@@ -4,8 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>채채 – 추천 결과</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=14" />
-
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=15" />
   <style>
     .custom-alert-backdrop {
       position: fixed;
@@ -500,6 +499,8 @@
             badge.textContent = level;
             // FIX: level 텍스트의 공백(space)을 밑줄(_)로 변경하여 CSS 클래스 이름과 일치시킵니다.
             const classNameLevel = level.replace(/\s/g, '');
+            const slugUnderscore = level.replace(/\s/g, '_');  // "매우 붐빔" → "매우_붐빔"
+
             badge.className = `congestion-badge level-${classNameLevel}`;
           } catch (error) {
             console.error('혼잡도 정보 로딩 실패:', error);

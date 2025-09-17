@@ -350,6 +350,8 @@
             badge.textContent = level;
             // 공백 제거해 CSS 클래스와 일치(예: "매우 붐빔" → "매우붐빔")
             const classNameLevel = level.replace(/\s/g, '');
+            const slugUnderscore = level.replace(/\s/g, '_');  // "매우 붐빔" → "매우_붐빔"
+
             badge.className = `congestion-badge level-${classNameLevel}`;
           } catch (error) {
             console.error('혼잡도 정보 로딩 실패:', error);

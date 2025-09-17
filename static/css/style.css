@@ -358,7 +358,7 @@ body{
 .level-여유 { background-color: #dcfce7; color: #22c55e; border-color: #bbf7d0; }       /* 수정: 초록색 */
 .level-보통 { background-color: #e0f2fe; color: #0ea5e9; border-color: #bae6fd; }       /* 수정: 파란색 */
 .level-붐빔 { background-color: #fef08a; color: #ca8a04; border-color: #fde047; }       /* 유지: 노란색 */
-.level-매우_붐빔 { background-color: #fee2e2; color: #ef4444; border-color: #fecaca; }   /* 유지: 빨간색 */
+.level-매우붐빔, .level-매우_붐빔 { background-color:#fee2e2; color:#ef4444; border-color:#fecaca; }
 .level-정보없음 { background-color: #f1f5f9; color: #64748b; border-color: #e2e8f0; } /* 유지: 회색 */
 
 /* ▲▲▲ [수정] 여기까지 ▲▲▲ */
