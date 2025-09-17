@@ -24,7 +24,7 @@ def run(
     days: int,
     cats: List[str],
     start_time: str = "08:00",
-    end_time: str   = "22:30",
+    end_time: str = "22:30",
     **_,
 ) -> pd.DataFrame:
     # ... (기존 입력 검증 및 데이터 로드 부분은 동일) ...
@@ -60,9 +60,9 @@ def run(
     cols_lower = {c.lower(): c for c in tmf.columns}
     need = {
         "title": cols_lower.get("title"), "addr1": cols_lower.get("addr1"),
-        "cat1":  cols_lower.get("cat1") or _first_contains(tmf.columns, "cat1"),
-        "mapx":  cols_lower.get("mapx") or cols_lower.get("lon") or cols_lower.get("longitude") or cols_lower.get("x"),
-        "mapy":  cols_lower.get("mapy") or cols_lower.get("lat") or cols_lower.get("latitude") or cols_lower.get("y"),
+        "cat1": cols_lower.get("cat1") or _first_contains(tmf.columns, "cat1"),
+        "mapx": cols_lower.get("mapx") or cols_lower.get("lon") or cols_lower.get("longitude") or cols_lower.get("x"),
+        "mapy": cols_lower.get("mapy") or cols_lower.get("lat") or cols_lower.get("latitude") or cols_lower.get("y"),
         "tour_score": cols_lower.get("tour_score"), "review_score": cols_lower.get("review_score"),
     }
     miss = [k for k, v in need.items() if v is None]
@@ -70,8 +70,8 @@ def run(
         raise KeyError(f"필수 컬럼 누락: {miss} / 실제컬럼: {list(tmf.columns)}")
 
     df = tmf.rename(columns={
-        need["title"]: "title", need["addr1"]: "addr1", need["cat1"]:  "cat1",
-        need["mapx"]:  "lon", need["mapy"]:  "lat",
+        need["title"]: "title", need["addr1"]: "addr1", need["cat1"]: "cat1",
+        need["mapx"]: "lon", need["mapy"]: "lat",
         need["tour_score"]: "tour_score", need["review_score"]: "review_score",
     }).copy()
     for c in ("lat", "lon", "tour_score", "review_score"):
@@ -131,8 +131,8 @@ def run(
     def estimate_transit_minutes(d_km: float, rel: str) -> int:
         base = (float(d_km) / BASE_SPEED_KMH) * 60.0 + ADD_FIXED_MIN
         if rel == "same_subway_station": return max(3, int(round(base - 10)))
-        if rel == "same_subway_line":    return max(4, int(round(base - 6)))
-        if rel == "same_bus_station":    return max(5, int(round(base - 5)))
+        if rel == "same_subway_line": return max(4, int(round(base - 6)))
+        if rel == "same_bus_station": return max(5, int(round(base - 5)))
         return int(round(base))
 
     def transit_minutes_via_api_or_est(p: pd.Series, n: pd.Series, rel: str, d_km: float, odsay_cache: dict) -> int:
@@ -151,10 +151,10 @@ def run(
         pb, nb = _nfc(prev_row.get("closest_bus_station", "")), _nfc(nxt_row.get("closest_bus_station", ""))
         ps, ns = _norm_station(ps_raw), _norm_station(ns_raw)
 
-        if ps and ns and ps == ns:  return "same_subway_station", "", ""
-        if pb and nb and pb == nb:  return "same_bus_station", "", ""
+        if ps and ns and ps == ns: return "same_subway_station", "", ""
+        if pb and nb and pb == nb: return "same_bus_station", "", ""
         if pl and nl and ps and ns and (pl == nl): return "same_subway_line", "", ""
-        if d_km < WALK_SKIP_KM:     return "walk_hint", "", ""
+        if d_km < WALK_SKIP_KM: return "walk_hint", "", ""
 
         if ps_raw and ns_raw and ps != ns:
             t1 = f"지하철 { _line_station_text(pl, ps_raw) } 승차".strip()
@@ -175,16 +175,16 @@ def run(
     meal_enabled_flag = ("음식" in set(cats))
 
     for d in range(1, days + 1):
-        base  = midnight0 + timedelta(days=d - 1)
+        base = midnight0 + timedelta(days=d - 1)
         label = f"{d}일"
-        want  = visit_counts[d - 1] if d - 1 < len(visit_counts) else 0
+        want = visit_counts[d - 1] if d - 1 < len(visit_counts) else 0
         if want <= 0: break
 
         pool = _ensure_variety_pool(route, pos, used_titles_global, want)
         if pool.empty: break
 
         day_start, day_end = _to_dt(base, start_time), _to_dt(base, end_time)
-        lunch_s, lunch_e   = base.replace(hour=11, minute=0), base.replace(hour=13, minute=0)
+        lunch_s, lunch_e = base.replace(hour=11, minute=0), base.replace(hour=13, minute=0)
         dinner_s, dinner_e = base.replace(hour=17, minute=0), base.replace(hour=20, minute=0)
 
         quota = _allocate_day_quota(cats, want)
@@ -201,7 +201,7 @@ def run(
             if sub.empty: return None
             dkm = np.sqrt((sub["lat"] - ref_lat) ** 2 + (sub["lon"] - ref_lon) ** 2) * 111.0
             pen = dkm.apply(lambda x: (x / BASE_SPEED_KMH) * 60.0) / 60.0
-            sc  = sub.get("final_score", pd.Series([0] * len(sub))).fillna(0) - 0.1 * pen
+            sc = sub.get("final_score", pd.Series([0] * len(sub))).fillna(0) - 0.1 * pen
             return sc.sort_values(ascending=False).index[0]
 
         def place_visit(idx: int):
@@ -380,7 +380,7 @@ def _haversine(lat1, lon1, lat2, lon2) -> float:
 def _geocode_region_kakao(region_name: str) -> Optional[Tuple[float, float]]:
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
     headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
-    params  = {"query": region_name}
+    params = {"query": region_name}
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=5)
         docs = resp.json().get("documents", [])
@@ -439,8 +439,8 @@ def _enrich_transit_hints_fast(df: pd.DataFrame, kakao_key: str) -> pd.DataFrame
             except Exception: pass
             
     df["closest_subway_station"] = df["tile_key"].map(lambda k: subway_map.get(k, ("", ""))[0])
-    df["closest_subway_line"]    = df["tile_key"].map(lambda k: subway_map.get(k, ("", ""))[1])
-    df["closest_bus_station"]    = df["tile_key"].map(lambda k: bus_map.get(k, ""))
+    df["closest_subway_line"] = df["tile_key"].map(lambda k: subway_map.get(k, ("", ""))[1])
+    df["closest_bus_station"] = df["tile_key"].map(lambda k: bus_map.get(k, ""))
     return df.drop(columns=["tile_key"])
 
 def _greedy_route(rows: pd.DataFrame, start_lat: float, start_lon: float) -> pd.DataFrame:

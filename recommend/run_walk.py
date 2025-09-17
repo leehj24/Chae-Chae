@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json, math, requests
@@ -11,13 +10,13 @@ import numpy as np
 import unicodedata as ud
 
 # ⚠️ PATH_TMF, KAKAO_API_KEY, ROOT, FAST_MODE 는 config에서만 관리
-from recommend.config import *  # PATH_TMF, KAKAO_API_KEY, ROOT, FAST_MODE  # noqa
+from recommend.config import * # PATH_TMF, KAKAO_API_KEY, ROOT, FAST_MODE  # noqa
 
 # =========================
 # Globals & Caches
 # =========================
-_TMF_CACHE: Optional[pd.DataFrame] = None             # ### NEW: CSV 메모리 캐시
-_GEOCODE_MEMO: dict[str, tuple[float, float]] = {}    # ### NEW: 지오코딩 메모리 캐시
+_TMF_CACHE: Optional[pd.DataFrame] = None           # ### NEW: CSV 메모리 캐시
+_GEOCODE_MEMO: dict[str, tuple[float, float]] = {}   # ### NEW: 지오코딩 메모리 캐시
 _GEOCODE_CACHE_FILE = Path(ROOT) / "_cache_geocode.json"  # ### NEW: 파일 캐시
 
 def _load_geocode_cache() -> dict:
@@ -37,10 +36,10 @@ def _save_geocode_cache(d: dict) -> None:
 # =========================
 def run(
     region: str,
-    transport_mode: str,             # 'walk' | 'transit' (여기선 반경 계산에만 사용)
-    score_label: str,                # '인기도지수' | '관광지수'
-    days: int,                       # UI 슬라이더 값
-    cats: List[str],                 # 예: ["음식","자연","레포츠"] (선호 순서)
+    transport_mode: str,    # 'walk' | 'transit' (여기선 반경 계산에만 사용)
+    score_label: str,   # '인기도지수' | '관광지수'
+    days: int,  # UI 슬라이더 값
+    cats: List[str],    # 예: ["음식","자연","레포츠"] (선호 순서)
 ) -> pd.DataFrame:
     """
     도보 중심 일정표 DataFrame을 반환.
@@ -106,7 +105,7 @@ def run(
 
     # ----- 1차 Bounding Box → 2차 벡터화 하버사인 -----
     radius_km = 5 if transport_mode == "walk" else 20
-    df = _bbox_prefilter(df, center_lat, center_lon, radius_km)              # ### NEW: bbox
+    df = _bbox_prefilter(df, center_lat, center_lon, radius_km)           # ### NEW: bbox
     if df.empty:
         raise RuntimeError("선택한 지역 주변(반경)에서 후보가 없습니다. 지역/반경/데이터를 확인하세요.")
 
