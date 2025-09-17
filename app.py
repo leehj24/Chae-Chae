@@ -494,16 +494,27 @@ def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, 
     if not KAKAO_API_KEY: return None
     _ensure_session()
     try:
+        # --- 수정된 부분 시작 ---
+
+        # 시도 1: 정확한 주소 검색 API 사용 (기존과 동일하게 가장 먼저 시도)
         if addr1:
             r = _SESSION.get("https://dapi.kakao.com/v2/local/search/address.json", params={"query": addr1}, timeout=4)
             if r.ok and r.json().get("documents"):
                 d = r.json()["documents"][0]
                 return float(d["y"]), float(d["x"])
-        q_kw = " ".join([_nfc(query), *_addr_region_tokens(addr1)])
-        r = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", params={"query": q_kw, "size": 1}, timeout=4)
+
+        # 시도 2: 주소 검색 실패 시 키워드 검색 API 사용
+        # 장소 이름(query)과 전체 주소(addr1)를 합쳐서 더 정확한 검색어를 생성합니다.
+        search_keyword = " ".join(filter(None, [_nfc(query), _nfc(addr1)]))
+
+        if not search_keyword:
+            return None # 검색할 정보가 없으면 종료
+
+        r = _SESSION.get("https://dapi.kakao.com/v2/local/search/keyword.json", params={"query": search_keyword, "size": 1}, timeout=4)
         if r.ok and r.json().get("documents"):
             d = r.json()["documents"][0]
             return float(d["y"]), float(d["x"])
+            
     except Exception:
         pass
     return None
