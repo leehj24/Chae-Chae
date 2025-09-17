@@ -946,6 +946,14 @@ def add_naver_calendar_api():
 @app.get("/naver/auth")
 def naver_auth_start():
     """사용자를 네이버 로그인 페이지로 리디렉션시킵니다."""
+    
+    # ▼▼▼ [수정] 네이버 API 키 설정 여부 확인 로직 추가 ▼▼▼
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        flash("서버에 네이버 API 키가 설정되지 않았습니다. 관리자에게 문의하세요.", "error")
+        print("⛔️ CRITICAL: NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET이 설정되지 않았습니다.")
+        return redirect(url_for('index'))
+    # ▲▲▲ [수정 완료] ▲▲▲
+
     state = str(uuid.uuid4()) # CSRF 공격 방지를 위한 state 값
     session['naver_auth_state'] = state
     
@@ -955,8 +963,14 @@ def naver_auth_start():
         'redirect_uri': url_for('naver_auth_callback', _external=True),
         'state': state
     }
-    auth_url = f"https://nid.naver.com/oauth2.0/authorize?{urlencode(params)}" # 이 부분에서 오류 발생
-    return redirect(auth_url)
+    # requests 라이브러리를 사용해 파라미터를 안전하게 인코딩하도록 변경
+    try:
+        req = requests.Request('GET', "https://nid.naver.com/oauth2.0/authorize", params=params)
+        auth_url = req.prepare().url
+        return redirect(auth_url)
+    except Exception as e:
+        flash(f"네이버 인증 URL 생성 중 오류가 발생했습니다: {e}", "error")
+        return redirect(url_for('index'))
 
 @app.get("/naver/callback")
 def naver_auth_callback():
