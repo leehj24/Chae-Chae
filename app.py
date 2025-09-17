@@ -927,8 +927,12 @@ def add_naver_calendar_api():
         success_count = 0
         total_count = len(schedules)
         for schedule in schedules:
-            if naver_calendar.add_schedule(session['naver_access_token'], schedule):
+            # ▼ 변경: (ok, body) 언팩 후 ok만 판정
+            ok, body = naver_calendar.add_schedule(session['naver_access_token'], schedule)
+            if ok:
                 success_count += 1
+            else:
+                print(f"[Naver Calendar] create failed: {body}")
         
         if success_count == total_count:
             return _json({"status": "success", "message": f"{total_count}개 일정이 모두 추가되었습니다."})
@@ -941,7 +945,6 @@ def add_naver_calendar_api():
         # 인증 전, 추가할 일정 목록 전체를 세션에 저장
         session['temp_schedule_data'] = schedules
         return _json({"status": "auth_required"})
-
 
 @app.get("/naver/auth")
 def naver_auth_start():
@@ -995,8 +998,12 @@ def naver_auth_callback():
         success_count = 0
         total_count = len(schedules)
         for schedule in schedules:
-            if naver_calendar.add_schedule(token_info['access_token'], schedule):
+            # ▼ 변경: (ok, body) 언팩 후 ok만 판정
+            ok, body = naver_calendar.add_schedule(token_info['access_token'], schedule)
+            if ok:
                 success_count += 1
+            else:
+                print(f"[Naver Calendar] create failed: {body}")
         
         if success_count > 0:
             flash(f"네이버에 로그인되었으며, 총 {success_count}개의 일정을 추가했습니다!", "success")
@@ -1098,5 +1105,17 @@ def view_shared_itinerary(share_id):
 # ======================================================================
 
 if __name__ == "__main__":
-    start_self_pinging()
+    # 배포환경 keep-alive용 셀프 핑 동작
+    def _self_ping():
+        url = os.environ.get("RENDER_EXTERNAL_URL")
+        if not url:
+            return
+        while True:
+            try:
+                requests.get(url, timeout=5)
+            except Exception:
+                pass
+            time.sleep(60 * 5)
+
+    threading.Thread(target=_self_ping, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
