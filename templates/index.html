@@ -498,7 +498,9 @@
             const data = await res.json();
             const level = data.level || '정보없음';
             badge.textContent = level;
-            badge.className = `congestion-badge level-${level}`;
+            // FIX: level 텍스트의 공백(space)을 밑줄(_)로 변경하여 CSS 클래스 이름과 일치시킵니다.
+            const classNameLevel = level.replace(/\s/g, '');
+            badge.className = `congestion-badge level-${classNameLevel}`;
           } catch (error) {
             console.error('혼잡도 정보 로딩 실패:', error);
             badge.textContent = '정보없음';
