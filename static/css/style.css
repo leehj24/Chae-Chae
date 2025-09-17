@@ -289,6 +289,33 @@ body{
   margin: 8px 0 16px;
 }
 
+.calendar-export-list .add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background-color: #03c75a; /* 네이버 초록색 */
+  color: white;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease; /* transition 속성 변경 */
+}
+.calendar-export-list .add-btn:hover:not(:disabled) {
+  opacity: 0.85;
+  transform: translateY(-1px); /* hover 효과 추가 */
+}
+.calendar-export-list .add-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #555; /* 비활성화 시 색상 변경 */
+}
+
 /* ▼▼▼ [수정] 아래 혼잡도 뱃지 스타일로 모두 교체 ▼▼▼ */
 .tl-title {
   /* 제목과 혼잡도 텍스트를 나란히 정렬하기 위해 flex 사용 */

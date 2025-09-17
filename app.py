@@ -21,11 +21,13 @@ from flask import (Flask, Response, abort, flash, redirect, render_template,
 from flask_session import Session
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
+from urllib.parse import urlencode
 
 from recommend.config import *
 import recommend.kakaotalk as kakaotalk
 import recommend.run_transit as run_transit_module
 import recommend.run_walk as run_walk_module
+import recommend.naver_calendar as naver_calendar
 
 # --- Flask 앱 설정 ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -913,6 +915,85 @@ def get_congestion():
                 return _json({"level": level})
 
     return _json({"level": "정보없음"})
+
+@app.post("/api/add-naver-calendar")
+def add_naver_calendar_api():
+    """프론트엔드에서 호출하는 API. 캘린더 일정 추가를 시작합니다."""
+    schedule_data = request.json
+    # 단일 객체 혹은 리스트를 모두 처리할 수 있도록 리스트로 통일
+    schedules = schedule_data if isinstance(schedule_data, list) else [schedule_data]
+
+    if 'naver_access_token' in session:
+        success_count = 0
+        total_count = len(schedules)
+        for schedule in schedules:
+            if naver_calendar.add_schedule(session['naver_access_token'], schedule):
+                success_count += 1
+        
+        if success_count == total_count:
+            return _json({"status": "success", "message": f"{total_count}개 일정이 모두 추가되었습니다."})
+        elif success_count > 0:
+            return _json({"status": "partial_success", "message": f"{total_count}개 중 {success_count}개 일정이 추가되었습니다."})
+        else:
+            del session['naver_access_token']
+            return _json({"status": "auth_required", "message": "토큰이 만료되었거나 오류가 발생하여 재인증이 필요합니다."})
+    else:
+        # 인증 전, 추가할 일정 목록 전체를 세션에 저장
+        session['temp_schedule_data'] = schedules
+        return _json({"status": "auth_required"})
+
+
+@app.get("/naver/auth")
+def naver_auth_start():
+    """사용자를 네이버 로그인 페이지로 리디렉션시킵니다."""
+    state = str(uuid.uuid4()) # CSRF 공격 방지를 위한 state 값
+    session['naver_auth_state'] = state
+    
+    params = {
+        'response_type': 'code',
+        'client_id': NAVER_CLIENT_ID,
+        'redirect_uri': url_for('naver_auth_callback', _external=True),
+        'state': state
+    }
+    auth_url = f"https://nid.naver.com/oauth2.0/authorize?{urlencode(params)}" # 이 부분에서 오류 발생
+    return redirect(auth_url)
+
+@app.get("/naver/callback")
+def naver_auth_callback():
+    """네이버 로그인 후 리디렉션되는 콜백 주소입니다."""
+    code = request.args.get('code')
+    state = request.args.get('state')
+
+    if not state or state != session.get('naver_auth_state'):
+        flash("비정상적인 접근입니다.", "error")
+        return redirect(url_for('index'))
+        
+    token_info = naver_calendar.get_access_token(code, state)
+    if not token_info or 'access_token' not in token_info:
+        flash("네이버 인증에 실패했습니다.", "error")
+        return redirect(url_for('index'))
+        
+    session['naver_access_token'] = token_info['access_token']
+    
+    # 세션에 저장된 일정 목록 가져오기
+    schedules = session.get('temp_schedule_data')
+    if schedules:
+        success_count = 0
+        total_count = len(schedules)
+        for schedule in schedules:
+            if naver_calendar.add_schedule(token_info['access_token'], schedule):
+                success_count += 1
+        
+        if success_count > 0:
+            flash(f"네이버에 로그인되었으며, 총 {success_count}개의 일정을 추가했습니다!", "success")
+        else:
+            flash("일정 추가에 실패했습니다. 다시 시도해주세요.", "error")
+            
+        del session['temp_schedule_data']
+    else:
+        flash("네이버 로그인이 완료되었습니다.", "success")
+        
+    return redirect(url_for('index'))
 
 # === KakaoTalk 연동 라우트 =========================================
 @app.get("/kakaotalk/auth")

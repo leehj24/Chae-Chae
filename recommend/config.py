@@ -27,6 +27,11 @@ TRANSIT_RADIUS_KM = 15 # 대중교통 반경 (km)
 USE_ENRICH_TRANSIT_HINTS = True # 대중교통 모드에서 힌트 데이터 사용 여부
 USE_ODSay = True # True: 실제대중교통경로시간 Flase: 직선거리*1.4로 시간계산 
 
+
+# ░░ Naver API 키 ░░
+NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID","")
+NAVER_CLIENT_SECRET =os.environ.get( "NAVER_CLIENT_SECRET","")
+
 # ░░ Kakao API 키 ░░
 # REST API 키 (서버 전용 — 절대 프론트 노출 금지)
 KAKAO_API_KEY = os.environ.get("KAKAO_API_KEY", "") # 대중교통 매핑용 카카오 api

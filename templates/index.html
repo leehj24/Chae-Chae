@@ -68,7 +68,7 @@
       opacity: 0.85;
     }
     .custom-alert-box.success .custom-alert-close-btn {
-      background-color: #2563eb; 
+      background-color: #2563eb;
     }
     .custom-alert-box.error {
       border-top: 5px solid #ef4444;
@@ -134,6 +134,7 @@
           {% set cat_icons = {'자연':'🌳','레포츠':'🏃','쇼핑':'🛍️','음식':'🍽️','인문(문화/예술/역사)':'🏛️', '문화':'🎭'} %}
           <div class="result-toolbar">
             <a class="primary-btn small" href="{{ url_for('kakao_auth') }}">카톡 메시지로 보내기</a>
+            <button type="button" id="exportNaverCalendarBtn" class="primary-btn small ghost">네이버 캘린더에 저장</button>
             <span class="muted" style="font-size:.9rem;">카드방식 일정 메시지 나에게 보내기</span>
           </div>
           <div class="day-stack">
@@ -161,9 +162,9 @@
                             <h4 class="tl-title">
                               <span class="ico">{{ cat_icons.get(r.cat1, '📍') }}</span>
                               {{ r.title }}
-                              <span 
-                                  class="congestion-badge" 
-                                  data-addr1="{{ r.addr1 }}" 
+                              <span
+                                  class="congestion-badge"
+                                  data-addr1="{{ r.addr1 }}"
                                   data-time="{{ r.start_time }}">
                                   <span class="loader"></span>
                                   <span class="text">로딩중...</span>
@@ -333,8 +334,26 @@
     </div>
   </div>
 
+  <div id="calendarExportModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="calendarExportModalTitle">
+    <div class="modal-content">
+        <header class="modal-header">
+            <div>
+                <h3 id="calendarExportModalTitle">네이버 캘린더에 저장</h3>
+                <span class="modal-title-place">저장할 일정을 선택하세요</span>
+            </div>
+            <button type="button" class="modal-close-btn" aria-label="닫기">&times;</button>
+        </header>
+        <div id="calendarExportList" class="modal-body">
+            <div class.spinner></div>
+        </div>
+        <footer class="modal-actions">
+            <button type="button" class="modal-btn modal-close-btn">닫기</button>
+        </footer>
+    </div>
+  </div>
+
   <script src="{{ url_for('static', filename='js/app.js') }}?v=5"></script>
-  
+
   {% if kakao_js_key %}
   <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ kakao_js_key }}&libraries=services"></script>
   {% endif %}
@@ -374,7 +393,7 @@
         const total = slidesEl.querySelectorAll('.carousel-slide').length;
         updateCarouselState(carousel, Math.min(cur, Math.max(0, total - 1)));
       };
-      
+
       function updateCarouselState(carousel, newIndex) {
         const slidesEl = carousel.querySelector('.slides');
         const slides = slidesEl ? Array.from(slidesEl.querySelectorAll('.carousel-slide')) : [];
@@ -388,7 +407,7 @@
         if (prevBtn) prevBtn.hidden = (i <= 0);
         if (nextBtn) nextBtn.hidden = (i >= n - 1);
       }
-      
+
       function setupCarousel(container, images, title, addr1) {
         const list = (images || []).filter(Boolean).slice(0, 4);
         const hasImages = list.length > 0;
@@ -487,11 +506,11 @@
           }
         }
       }
-      
+
       const ratingModal = document.getElementById('ratingModal');
       const reviewModal = document.getElementById('reviewModal');
       const writeReviewModal = document.getElementById('writeReviewModal');
-      
+
       function updateStarRatingUI(starDisplayElement, avgRating, totalRatings) {
         if (!starDisplayElement) return;
         const avg = avgRating || 0;
@@ -523,7 +542,7 @@
           return defaultData;
         }
       }
-      
+
       function setupModals() {
         if (!ratingModal || !reviewModal || !writeReviewModal) return;
 
@@ -533,7 +552,7 @@
         const modalPlaceTitle = ratingModal.querySelector('#modalPlaceTitle');
         const ratingFormStars = ratingModal.querySelector('.stars');
         const submitRatingBtn = ratingModal.querySelector('#submitRatingBtn');
-        
+
         const setStarsInModal = (rating) => {
           const r = rating || 0;
           ratingFormStars.querySelectorAll('.star').forEach(star => { star.classList.toggle('selected', star.dataset.value <= r); });
@@ -551,7 +570,7 @@
           setStarsInModal(details.my_rating || 0);
           ratingModal.classList.add('visible');
         };
-        
+
         submitRatingBtn.addEventListener('click', async () => {
           if (!currentReviewTarget) return;
           const { title, addr1 } = currentReviewTarget.dataset;
@@ -571,10 +590,10 @@
         const customReviewContainer = reviewModal.querySelector('#customReviewContainer');
         const reviewList = reviewModal.querySelector('#reviewList');
         const openWriteReviewBtn = reviewModal.querySelector('#openWriteReviewBtn');
-        const writeReviewModalPlaceTitle = writeReviewModal.querySelector('#writeReviewModalPlaceTitle');
+        const writeReviewModalPlaceTitle = writeReviewModal.querySelector('#writeReviewModalTitle');
         const reviewTextarea = writeReviewModal.querySelector('#reviewTextarea');
         const submitReviewTextBtn = writeReviewModal.querySelector('#submitReviewBtn');
-        
+
         const openReviewModal = (targetItem, kakaoUrl) => {
           currentReviewTarget = targetItem;
           reviewModalPlaceTitle.textContent = targetItem.dataset.title;
@@ -594,7 +613,7 @@
             reviewModal.classList.remove('visible');
             reviewIframe.src = 'about:blank';
         };
-        
+
         async function fetchAndRenderReviews() {
           if (!currentReviewTarget) return;
           const { title, addr1 } = currentReviewTarget.dataset;
@@ -621,7 +640,7 @@
           submitReviewTextBtn.disabled = (reviewTextarea.value.trim().length < 10);
           writeReviewModal.classList.add('visible');
         };
-        
+
         openWriteReviewBtn.addEventListener('click', openWriteReviewModal);
         reviewTextarea.addEventListener('input', () => { submitReviewTextBtn.disabled = (reviewTextarea.value.trim().length < 10); });
         submitReviewTextBtn.addEventListener('click', async () => {
@@ -662,8 +681,117 @@
         }
       }
 
+      setupModals();
+
+      function setupCalendarExport() {
+        const exportBtn = document.getElementById('exportNaverCalendarBtn');
+        const calendarModal = document.getElementById('calendarExportModal');
+        const calendarList = document.getElementById('calendarExportList');
+        
+        if (!exportBtn || !calendarModal || !calendarList) return;
+
+        async function addDayEventsToNaver(schedules, buttonElement) {
+            try {
+                buttonElement.textContent = '처리중...';
+                buttonElement.disabled = true;
+
+                const res = await fetch('/api/add-naver-calendar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(schedules),
+                });
+                const data = await res.json();
+
+                if (data.status === 'success' || data.status === 'partial_success') {
+                    buttonElement.textContent = '✅ 추가됨';
+                    alert(data.message);
+                } else if (data.status === 'auth_required') {
+                    window.location.href = '/naver/auth';
+                } else {
+                    throw new Error(data.message || '알 수 없는 오류');
+                }
+            } catch (err) {
+                alert(`오류 발생: ${err.message}`);
+                buttonElement.textContent = '하루 일정 추가';
+                buttonElement.disabled = false;
+            }
+        }
+
+        const openModal = () => {
+          const tripStartDateStr = chatWindow.dataset.start;
+          if (!tripStartDateStr) {
+            alert('여행 시작 날짜 정보가 없어 캘린더에 추가할 수 없습니다.');
+            return;
+          }
+
+          const tripStartDate = new Date(tripStartDateStr);
+          const visitItems = document.querySelectorAll('.tl-item.visit');
+          
+          const schedulesByDay = {};
+
+          visitItems.forEach((item) => {
+            const day = parseInt(item.closest('.day-card').dataset.day, 10);
+            if (!schedulesByDay[day]) {
+              schedulesByDay[day] = [];
+            }
+            
+            const title = item.dataset.title;
+            const addr = item.dataset.addr1;
+            const [startTimeStr, endTimeStr] = item.querySelector('.tl-time').textContent.split('–').map(s => s.trim());
+            
+            const eventDate = new Date(tripStartDate);
+            eventDate.setDate(tripStartDate.getDate() + day - 1);
+            
+            const yyyy = eventDate.getFullYear();
+            const mm = String(eventDate.getMonth() + 1).padStart(2, '0');
+            const dd = String(eventDate.getDate()).padStart(2, '0');
+            const datePrefix = `${yyyy}-${mm}-${dd}`;
+            
+            schedulesByDay[day].push({
+              title: `[채채] ${title}`,
+              startTime: `${datePrefix}T${startTimeStr}:00`,
+              endTime: `${datePrefix}T${endTimeStr}:00`,
+              location: addr,
+              description: `추천 여행 일정: ${title}\n주소: ${addr}`
+            });
+          });
+
+          let scheduleHtml = '<ul class="calendar-export-list">';
+          for (const day in schedulesByDay) {
+            const daySchedulesJson = JSON.stringify(schedulesByDay[day]);
+            scheduleHtml += `
+              <li>
+                <div class="info">
+                  <span class="day">${day}일차</span>
+                  <span class="title">${schedulesByDay[day].length}개 일정</span>
+                </div>
+                <button type="button" class="add-btn daily" data-schedules='${daySchedulesJson}'>하루 일정 추가</button>
+              </li>`;
+          }
+          scheduleHtml += '</ul>';
+          calendarList.innerHTML = scheduleHtml;
+          calendarModal.classList.add('visible');
+        };
+        
+        calendarList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('add-btn') && e.target.classList.contains('daily')) {
+                const button = e.target;
+                const schedules = JSON.parse(button.dataset.schedules);
+                if (schedules && schedules.length > 0) {
+                    addDayEventsToNaver(schedules, button);
+                }
+            }
+        });
+
+        const closeModal = () => calendarModal.classList.remove('visible');
+        exportBtn.addEventListener('click', openModal);
+        calendarModal.querySelectorAll('.modal-close-btn').forEach(btn => btn.addEventListener('click', closeModal));
+      }
+      
+      setupCalendarExport();
+
       function initializeAllItems() {
-        updateCongestionLevels(); 
+        updateCongestionLevels();
         const allVisitItems = document.querySelectorAll('li.tl-item.visit');
         if (observer) observer.disconnect();
         observer = new IntersectionObserver((entries, obs) => {
@@ -677,7 +805,7 @@
               const mapContainer = item.querySelector('.kakao-map-container');
               const placeholder = item.querySelector('.media-placeholder');
               if (firstimage && placeholder) { placeholder.style.backgroundImage = `url('/img-proxy?u=${encodeURIComponent(firstimage)}')`; }
-              
+
               fetch(`/api/place-media?title=${encodeURIComponent(title)}&addr1=${encodeURIComponent(addr1)}`)
                 .then(res => res.json())
                 .then(data => {
@@ -694,7 +822,7 @@
                 })
                 .catch(err => {
                   console.error("미디어 로딩 오류:", title, err);
-                  if (carouselContainer) setupCarousel(carouselContainer, [], title, addr1); 
+                  if (carouselContainer) setupCarousel(carouselContainer, [], title, addr1);
                   if (mapContainer) setupMap(mapContainer, null, title);
                 });
 
@@ -706,7 +834,6 @@
         allVisitItems.forEach(item => observer.observe(item));
       }
 
-      setupModals();
       if (window.kakao && window.kakao.maps) {
         kakao.maps.load(initializeAllItems);
       } else {
