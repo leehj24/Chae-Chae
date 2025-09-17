@@ -937,38 +937,58 @@ def get_congestion():
 
 @app.post("/api/add-naver-calendar")
 def add_naver_calendar_api():
-    payload = request.get_json(silent=True) or {}
-    schedules = payload.get("schedules") or payload  # 단건/복수 모두 허용
+    body = request.get_json(silent=True)
 
-    if not isinstance(schedules, list):
-        schedules = [schedules]
+    # --- 입력 정규화: dict/array 모두 허용 ---
+    schedules: list[dict] = []
+    if isinstance(body, list):
+        schedules = body
+    elif isinstance(body, dict):
+        cand = body.get("schedules") or body.get("schedule") or body
+        schedules = cand if isinstance(cand, list) else [cand]
+    else:
+        schedules = []
 
     if not schedules or not isinstance(schedules[0], dict) or "title" not in schedules[0]:
         return _json({"status": "bad_request", "message": "유효한 일정 데이터가 필요합니다."}, 400)
 
     access_token = session.get("naver_access_token")
     if not access_token:
-        # 인증 전: 추가할 일정 전부를 임시로 세션에 저장
         session["temp_schedule_data"] = schedules
         return _json({"status": "auth_required"})
 
-    # 이미 인증되어 있으면 즉시 추가
+    # --- 네이버 캘린더 생성 ---
     success = 0
+    html_like_failure = False
+    last_meta = {}
     for sc in schedules:
-        ok, body = naver_calendar.add_schedule(access_token, sc)
+        ok, body_text, meta = naver_calendar.add_schedule(access_token, sc, return_meta=True)
         if ok:
             success += 1
         else:
-            print(f"[Naver Calendar] create failed: {body}")
+            # HTML/리다이렉트/인증 오류면 재인증 요구
+            html_like_failure = html_like_failure or bool(meta.get("auth_like_failure"))
+            last_meta = meta
+            print(f"[Naver Calendar] create failed: status={meta.get('status')} ct={meta.get('content_type')} url={meta.get('url')}\n{body_text[:300]}")
 
     if success == len(schedules):
         return _json({"status": "success", "message": f"{success}개 일정 추가 완료"})
-    elif success > 0:
-        return _json({"status": "partial_success", "message": f"{len(schedules)}개 중 {success}개 추가"})
-    else:
-        # 토큰 만료 등
+
+    if html_like_failure:
+        # 토큰 만료/리다이렉트 등으로 보이면 재인증 유도
         session.pop("naver_access_token", None)
-        return _json({"status": "auth_required", "message": "토큰 만료 또는 오류 – 재인증 필요"})
+        session["temp_schedule_data"] = schedules
+        return _json({
+            "status": "auth_required",
+            "message": "네이버 인증이 필요합니다.",
+            "meta": {"hint": "token_expired_or_redirect", **last_meta}
+        })
+
+    if success > 0:
+        return _json({"status": "partial_success", "message": f"{len(schedules)}개 중 {success}개 추가"})
+
+    # 기타 실패
+    return _json({"status": "fail", "message": "일정 추가 실패"}, 502)
 
 @app.get("/naver/auth")
 def naver_auth_start():

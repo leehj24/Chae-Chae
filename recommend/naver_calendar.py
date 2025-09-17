@@ -48,24 +48,8 @@ def add_schedule(
     access_token: str,
     schedule: dict,
     calendar_id: str = "defaultCalendarId",
-) -> Tuple[bool, str]:
-    """
-    네이버 캘린더 일정 생성.
-    Args:
-        access_token: 네이버 OAuth 액세스 토큰
-        schedule: {
-            "title": str,
-            "startTime": "YYYY-MM-DDTHH:MM[:SS]",
-            "endTime":   "YYYY-MM-DDTHH:MM[:SS]",
-            "location": str,           # optional
-            "description": str,        # optional
-        }
-        calendar_id: 기본값은 'defaultCalendarId'
-    Returns:
-        (ok: bool, body: str)
-        ok 은 HTTP 200 그리고 응답 JSON result == "success" 일 때만 True
-        body 는 원문 응답 문자열
-    """
+    return_meta: bool = False,
+) -> Tuple[bool, str] | Tuple[bool, str, dict]:
     ical = _build_vcalendar(
         summary=schedule.get("title", "제목 없음"),
         start_iso=schedule["startTime"],
@@ -77,6 +61,7 @@ def add_schedule(
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "Accept": "application/json",  # JSON 선호 명시
     }
     data = {
         "calendarId": calendar_id,
@@ -84,22 +69,37 @@ def add_schedule(
     }
 
     try:
-        r = requests.post(CREATE_API_URL, headers=headers, data=data, timeout=10)
+        r = requests.post(CREATE_API_URL, headers=headers, data=data, timeout=10, allow_redirects=True)
         body = r.text
-        if not r.ok:
-            # HTTP 오류면 바로 실패
-            return False, body
+        ct = (r.headers.get("Content-Type") or "").lower()
+        url_after = r.url
+        was_redirect = bool(r.history)
 
-        # JSON 파싱해 result 확인(네이버는 성공 시 result: "success")
-        try:
-            j = r.json()
-            ok = (j.get("result") == "success")
-            return (ok, body) if ok else (False, body)
-        except Exception:
-            # JSON 아님 → 실패 처리
-            return False, body
+        meta = {
+            "status": r.status_code,
+            "content_type": ct,
+            "url": url_after,
+            "redirected": was_redirect,
+            # 로그인/HTML/리다이렉트 등 JSON이 아닐 때를 인증류 실패로 간주
+            "auth_like_failure": (("text/html" in ct) or was_redirect or ("nid.naver.com" in (url_after or "")) or r.status_code in (401, 403)),
+        }
+
+        if r.ok and "application/json" in ct:
+            try:
+                j = r.json()
+                ok = (j.get("result") == "success")
+                return (ok, body, meta) if return_meta else (ok, body)
+            except Exception:
+                # JSON 파싱 실패 → HTML 가능성 높음
+                meta["auth_like_failure"] = True
+                return (False, body, meta) if return_meta else (False, body)
+
+        # HTTP OK라도 HTML/리다이렉트면 실패로 처리
+        return (False, body, meta) if return_meta else (False, body)
+
     except requests.exceptions.RequestException as e:
-        return False, str(e)
+        meta = {"status": 0, "content_type": "", "url": "", "redirected": False, "auth_like_failure": False, "exc": str(e)}
+        return (False, str(e), meta) if return_meta else (False, str(e))
 
 # ─────────────────────────────────────────────────────────────────────
 # ICS Builder
