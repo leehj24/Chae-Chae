@@ -53,15 +53,15 @@
             <ol class="timeline">
               {% for r in rows %}
                 {% set is_move = (r.title == '이동') %}
-                <li class="tl-item {{ 'move' if is_move else 'visit' }}"
-                    {% if not is_move %}
-                      data-title="{{ r.title }}"
-                      data-addr1="{{ r.addr1 }}"
-                      data-mapx="{{ r.get('mapx', '') }}"
-                      data-mapy="{{ r.get('mapy', '') }}"
-                      data-loaded="false"
-                      data-firstimage="{{ r.get('firstimage', '') }}"
-                    {% endif %}>
+                <li class="tl-item {{ 'move' if is_move else 'visit' }} {{ 'upload-locked' if (not is_move and r.get('user_has_uploaded')) }}"
+                  {% if not is_move %}
+                    data-title="{{ r.title }}"
+                    data-addr1="{{ r.addr1 }}"
+                    data-mapx="{{ r.get('mapx', '') }}"
+                    data-mapy="{{ r.get('mapy', '') }}"
+                    data-loaded="false"
+                    data-firstimage="{{ r.get('firstimage', '') }}"
+                  {% endif %}>
                 <div class="tl-content-wrapper">
                     <div class="tl-text-content">
                       <div class="tl-time">{{ r.start_time }} – {{ r.end_time }}</div>
@@ -484,10 +484,14 @@
 
         const openWriteReviewModal = async () => {
           if (!currentReviewTarget) return;
+          const details = await fetchPlaceDetails(currentReviewTarget, true);
+          if (details.my_review_text) {
+            alert('이미 이 장소에 후기를 작성했습니다.');
+            return;
+          }
           writeReviewModalPlaceTitle.textContent = currentReviewTarget.dataset.title;
-          const details = await fetchPlaceDetails(currentReviewTarget);
-          reviewTextarea.value = details.my_review_text || '';
-          submitReviewTextBtn.disabled = (reviewTextarea.value.trim().length < 10);
+          reviewTextarea.value = '';
+          submitReviewTextBtn.disabled = true;
           writeReviewModal.classList.add('visible');
         };
         

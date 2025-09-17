@@ -146,7 +146,7 @@
                 <ol class="timeline">
                   {% for r in rows %}
                     {% set is_move = (r.title == '이동') %}
-                    <li class="tl-item {{ 'move' if is_move else 'visit' }}"
+                    <li class="tl-item {{ 'move' if is_move else 'visit' }} {{ 'upload-locked' if not is_move and r.get('user_has_uploaded') }}"
                         {% if not is_move %}
                           data-title="{{ r.title }}"
                           data-addr1="{{ r.addr1 }}"

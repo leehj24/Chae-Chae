@@ -862,9 +862,21 @@ def api_submit_review():
             return _json({"ok": False, "error": "별점은 0-5 사이의 정수여야 합니다."}, 400)
 
     if review_text:
-        review_id = next((rid for rid, r in reviews_db[key].get("reviews", {}).items() if r.get('user_id') == user_id), str(uuid.uuid4()))
-        reviews_db[key].setdefault("reviews", {})[review_id] = {
-            "user_id": user_id, "text": review_text, "timestamp": datetime.now(timezone.utc).isoformat()
+        reviews_db.setdefault(key, {"ratings": {}, "reviews": {}})
+        # 이미 내가 쓴 리뷰가 있는지 확인
+        existing_id = next(
+            (rid for rid, r in reviews_db[key]["reviews"].items()
+            if r.get("user_id") == user_id),
+            None
+        )
+        if existing_id is not None:
+            return _json({"ok": False, "error": "이미 이 장소에 후기를 작성하셨습니다."}, 409)
+
+        review_id = str(uuid.uuid4())
+        reviews_db[key]["reviews"][review_id] = {
+            "user_id": user_id,
+            "text": review_text,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
     _save_user_reviews(reviews_db)
