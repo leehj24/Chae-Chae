@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import unicodedata as ud
 import requests
-
+from datetime import datetime, timedelta
 # 프로젝트 공통 설정: PATH_TMF, KAKAO_API_KEY 등 (config.py에서 제공)
 from recommend.config import *  # noqa: F401,F403
 
@@ -345,10 +345,18 @@ def run(
             if time_left() <= 0.02:
                 break
             rec = selected.iloc[idx]; idx += 1
+            start_hm = slots[taken]
+            # strptime과 timedelta를 사용해 end_time 계산 (기본 체류시간 90분)
+            start_dt = datetime.strptime(start_hm, "%H:%M")
+            end_dt = start_dt + timedelta(minutes=90)
+            end_hm = end_dt.strftime("%H:%M")
+
             rows.append({
                 "day": day,
+                "day_label": f"{day}일차",  # day_label 추가
                 # "visit_order": taken + 1,
-                "time": slots[taken],
+                "start_time": start_hm,     # time -> start_time
+                "end_time": end_hm,         # end_time 추가
                 "title": rec.get("title"),
                 "addr1": rec.get("addr1"),
                 "cat1": rec.get("cat1"),
@@ -357,8 +365,8 @@ def run(
                 "score": float(rec.get("score_for_sort", 0.0)),
                 "score_label": score_label,
                 "distance_km": float(rec.get("distance_km", np.nan)),
-                "lat": float(rec.get("mapy", np.nan)),
-                "lon": float(rec.get("mapx", np.nan)),
+                "mapy": float(rec.get("mapy", np.nan)), # lat -> mapy
+                "mapx": float(rec.get("mapx", np.nan)), # lon -> mapx
             })
             taken += 1
 
@@ -367,9 +375,16 @@ def run(
             fb = selected.iloc[min(idx, n - 1)] if n > 0 and idx < n else tmf.sort_values(
                 ["distance_km", "score_for_sort"], ascending=[True, False]
             ).head(1).iloc[0]
+            start_hm = _time_slots_per_day(start_time, end_time, 1)[0]
+            start_dt = datetime.strptime(start_hm, "%H:%M")
+            end_dt = start_dt + timedelta(minutes=90)
+            end_hm = end_dt.strftime("%H:%M")
+
             rows.append({
                 "day": day,
-                "time": _time_slots_per_day(start_time, end_time, 1)[0],
+                "day_label": f"{day}일차",
+                "start_time": start_hm,
+                "end_time": end_hm,
                 "title": fb.get("title"),
                 "addr1": fb.get("addr1"),
                 "cat1": fb.get("cat1"),
@@ -378,8 +393,8 @@ def run(
                 "score": float(fb.get("score_for_sort", 0.0)),
                 "score_label": score_label,
                 "distance_km": float(fb.get("distance_km", np.nan)),
-                "lat": float(fb.get("mapy", np.nan)),
-                "lon": float(fb.get("mapx", np.nan)),
+                "mapy": float(fb.get("mapy", np.nan)),
+                "mapx": float(fb.get("mapx", np.nan)),
             })
             idx = min(idx + 1, n)
 
