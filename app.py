@@ -49,6 +49,11 @@ app.config.update(
     SESSION_PERMANENT=False,
     SESSION_USE_SIGNER=True,
     SESSION_COOKIE_NAME="srv_session",
+    # ▼ Render/HTTPS에서 세션이 콜백까지 붙도록 명시
+    PREFERRED_URL_SCHEME="https",
+    SESSION_COOKIE_SECURE=True,       # HTTPS만
+    SESSION_COOKIE_SAMESITE="Lax",    # OAuth 콜백 안전
+    SESSION_COOKIE_HTTPONLY=True,
 )
 Path(app.config["SESSION_FILE_DIR"]).mkdir(parents=True, exist_ok=True)
 Session(app)
@@ -294,6 +299,20 @@ def _json(payload: Dict[str, Any], status: int = 200) -> Response:
         status=status,
         mimetype="application/json"
     )
+
+def _external_base_url() -> str:
+    """
+    콜백을 항상 동일 호스트로 고정.
+    1) PUBLIC_BASE_URL (권장: https://your.domain)
+    2) RENDER_EXTERNAL_URL (예: https://xxx.onrender.com)
+    3) 최후수단: X-Forwarded-Proto/Host 기반 추론
+    """
+    base = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    if base:
+        return base.rstrip("/")
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    return f"{scheme}://{host}"
 
 def _df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
     clean = df.replace({np.nan: None})
@@ -918,103 +937,114 @@ def get_congestion():
 
 @app.post("/api/add-naver-calendar")
 def add_naver_calendar_api():
-    """프론트엔드에서 호출하는 API. 캘린더 일정 추가를 시작합니다."""
-    schedule_data = request.json
-    # 단일 객체 혹은 리스트를 모두 처리할 수 있도록 리스트로 통일
-    schedules = schedule_data if isinstance(schedule_data, list) else [schedule_data]
+    payload = request.get_json(silent=True) or {}
+    schedules = payload.get("schedules") or payload  # 단건/복수 모두 허용
 
-    if 'naver_access_token' in session:
-        success_count = 0
-        total_count = len(schedules)
-        for schedule in schedules:
-            # ▼ 변경: (ok, body) 언팩 후 ok만 판정
-            ok, body = naver_calendar.add_schedule(session['naver_access_token'], schedule)
-            if ok:
-                success_count += 1
-            else:
-                print(f"[Naver Calendar] create failed: {body}")
-        
-        if success_count == total_count:
-            return _json({"status": "success", "message": f"{total_count}개 일정이 모두 추가되었습니다."})
-        elif success_count > 0:
-            return _json({"status": "partial_success", "message": f"{total_count}개 중 {success_count}개 일정이 추가되었습니다."})
-        else:
-            del session['naver_access_token']
-            return _json({"status": "auth_required", "message": "토큰이 만료되었거나 오류가 발생하여 재인증이 필요합니다."})
-    else:
-        # 인증 전, 추가할 일정 목록 전체를 세션에 저장
-        session['temp_schedule_data'] = schedules
+    if not isinstance(schedules, list):
+        schedules = [schedules]
+
+    if not schedules or not isinstance(schedules[0], dict) or "title" not in schedules[0]:
+        return _json({"status": "bad_request", "message": "유효한 일정 데이터가 필요합니다."}, 400)
+
+    access_token = session.get("naver_access_token")
+    if not access_token:
+        # 인증 전: 추가할 일정 전부를 임시로 세션에 저장
+        session["temp_schedule_data"] = schedules
         return _json({"status": "auth_required"})
+
+    # 이미 인증되어 있으면 즉시 추가
+    success = 0
+    for sc in schedules:
+        ok, body = naver_calendar.add_schedule(access_token, sc)
+        if ok:
+            success += 1
+        else:
+            print(f"[Naver Calendar] create failed: {body}")
+
+    if success == len(schedules):
+        return _json({"status": "success", "message": f"{success}개 일정 추가 완료"})
+    elif success > 0:
+        return _json({"status": "partial_success", "message": f"{len(schedules)}개 중 {success}개 추가"})
+    else:
+        # 토큰 만료 등
+        session.pop("naver_access_token", None)
+        return _json({"status": "auth_required", "message": "토큰 만료 또는 오류 – 재인증 필요"})
 
 @app.get("/naver/auth")
 def naver_auth_start():
-    """사용자를 네이버 로그인 페이지로 리디렉션시킵니다."""
-    
-    # ▼▼▼ [수정] 네이버 API 키 설정 여부 확인 로직 추가 ▼▼▼
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-        flash("서버에 네이버 API 키가 설정되지 않았습니다. 관리자에게 문의하세요.", "error")
-        print("⛔️ CRITICAL: NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET이 설정되지 않았습니다.")
-        return redirect(url_for('index'))
-    # ▲▲▲ [수정 완료] ▲▲▲
+        flash("서버에 네이버 API 키가 설정되어 있지 않습니다.", "error")
+        return redirect(url_for("index"))
 
-    state = str(uuid.uuid4()) # CSRF 공격 방지를 위한 state 값
-    session['naver_auth_state'] = state
-    
+    state = str(uuid.uuid4())
+    session["naver_auth_state"] = state
+
+    # ▼ 콜백 URL 고정 (도메인 섞임 방지)
+    base_url = _external_base_url()  # e.g. https://your.app
+    redirect_uri = f"{base_url}{url_for('naver_auth_callback', _external=False)}"
+    session["naver_redirect_uri"] = redirect_uri  # 디버깅용
+
     params = {
-        'response_type': 'code',
-        'client_id': NAVER_CLIENT_ID,
-        'redirect_uri': url_for('naver_auth_callback', _external=True),
-        'state': state
+        "response_type": "code",
+        "client_id": NAVER_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "state": state,
     }
-    # requests 라이브러리를 사용해 파라미터를 안전하게 인코딩하도록 변경
-    try:
-        req = requests.Request('GET', "https://nid.naver.com/oauth2.0/authorize", params=params)
-        auth_url = req.prepare().url
-        return redirect(auth_url)
-    except Exception as e:
-        flash(f"네이버 인증 URL 생성 중 오류가 발생했습니다: {e}", "error")
-        return redirect(url_for('index'))
+
+    # 로그로 즉시 진단 가능
+    print("[NAVER AUTH] base_url=", base_url)
+    print("[NAVER AUTH] redirect_uri=", redirect_uri)
+    print("[NAVER AUTH] state(session)=", state)
+
+    # 안전 인코딩
+    req = requests.Request("GET", "https://nid.naver.com/oauth2.0/authorize", params=params)
+    auth_url = req.prepare().url
+    return redirect(auth_url)
 
 @app.get("/naver/callback")
 def naver_auth_callback():
-    """네이버 로그인 후 리디렉션되는 콜백 주소입니다."""
-    code = request.args.get('code')
-    state = request.args.get('state')
+    code = request.args.get("code")
+    state = request.args.get("state")
+    sess_state = session.get("naver_auth_state")
 
-    if not state or state != session.get('naver_auth_state'):
+    # 디버깅 로그
+    print("[NAVER CALLBACK] recv_state=", state)
+    print("[NAVER CALLBACK] sess_state=", sess_state)
+    print("[NAVER CALLBACK] host_url=", request.host_url)
+    print("[NAVER CALLBACK] saved_redirect_uri=", session.get("naver_redirect_uri"))
+
+    if not state or state != sess_state:
         flash("비정상적인 접근입니다.", "error")
-        return redirect(url_for('index'))
-        
+        return redirect(url_for("index"))
+
     token_info = naver_calendar.get_access_token(code, state)
-    if not token_info or 'access_token' not in token_info:
+    if not token_info or "access_token" not in token_info:
         flash("네이버 인증에 실패했습니다.", "error")
-        return redirect(url_for('index'))
-        
-    session['naver_access_token'] = token_info['access_token']
-    
-    # 세션에 저장된 일정 목록 가져오기
-    schedules = session.get('temp_schedule_data')
+        return redirect(url_for("index"))
+
+    session["naver_access_token"] = token_info["access_token"]
+    # 일회성 state는 바로 제거
+    session.pop("naver_auth_state", None)
+
+    schedules = session.get("temp_schedule_data")
     if schedules:
-        success_count = 0
-        total_count = len(schedules)
-        for schedule in schedules:
-            # ▼ 변경: (ok, body) 언팩 후 ok만 판정
-            ok, body = naver_calendar.add_schedule(token_info['access_token'], schedule)
+        success = 0
+        for sc in schedules:
+            ok, body = naver_calendar.add_schedule(token_info["access_token"], sc)
             if ok:
-                success_count += 1
+                success += 1
             else:
                 print(f"[Naver Calendar] create failed: {body}")
-        
-        if success_count > 0:
-            flash(f"네이버에 로그인되었으며, 총 {success_count}개의 일정을 추가했습니다!", "success")
+        session.pop("temp_schedule_data", None)
+
+        if success > 0:
+            flash(f"네이버 일정 {success}개 추가 완료", "success")
         else:
-            flash("일정 추가에 실패했습니다. 다시 시도해주세요.", "error")
-            
-        del session['temp_schedule_data']
+            flash("일정 추가에 실패했습니다. 다시 시도하세요.", "error")
     else:
-        flash("네이버 로그인이 완료되었습니다.", "success")
-        
-    return redirect(url_for('index'))
+        flash("네이버 로그인 완료", "success")
+
+    return redirect(url_for("index"))
 
 # === KakaoTalk 연동 라우트 =========================================
 @app.get("/kakaotalk/auth")
