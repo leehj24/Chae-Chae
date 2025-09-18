@@ -21,19 +21,19 @@
 
   <main class="share-page-main">
     {% if share_info %}
-    <section class="summary-card">
+    <section class="summary-card summary-center">
       <h1 class="summary-title">{{ share_info.get('region', '여행') }} 일정</h1>
       <p class="summary-meta">
         {% if share_info.get('start_date') and share_info.get('end_date') %}
-        <span>📅 {{ share_info.start_date }} ~ {{ share_info.end_date }} ({{ share_info.days }}일)</span>
+          <span>📅 {{ share_info.start_date }} ~ {{ share_info.end_date }} ({{ share_info.days }}일)</span>
         {% else %}
-        <span>📅 {{ share_info.get('days', '?') }}일간의 여행</span>
+          <span>📅 {{ share_info.get('days', '?') }}일간의 여행</span>
         {% endif %}
       </p>
       <div class="summary-tags">
         <span class="chip primary">{{ share_info.get('score_label', '추천') }}</span>
         {% for theme in share_info.get('cats', []) %}
-        <span class="chip">{{ theme }}</span>
+          <span class="chip">{{ theme }}</span>
         {% endfor %}
         <span class="chip">{{ '걷기' if share_info.get('transport_mode') == 'walk' else '대중교통' }}</span>
       </div>

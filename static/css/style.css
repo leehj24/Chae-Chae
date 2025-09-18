@@ -369,3 +369,49 @@ body{
   color: #ffffff;
   border-color: #718096;
 }
+
+/* ===== Share page summary header (centered) ===== */
+.share-page-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px 32px;
+}
+
+.summary-card.summary-center {
+  /* 카드 외형은 기존 summary-card 규칙이 있더라도 안전하게 겹쳐 쓰기 */
+  text-align: center;
+  display: grid;
+  gap: 8px;
+  justify-items: center;   /* 내부 요소 가운데 정렬 */
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 18px 16px;
+  margin-bottom: 14px;
+}
+
+.summary-card.summary-center .summary-title {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: .01em;
+  font-weight: 800;
+}
+
+.summary-card.summary-center .summary-meta {
+  margin: 2px 0 6px 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.summary-card.summary-center .summary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* 모바일 폰트 보정 */
+@media (max-width: 560px) {
+  .summary-card.summary-center .summary-title { font-size: 1.2rem; }
+}
