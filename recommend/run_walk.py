@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import unicodedata as ud
 import requests
+import re
 
 # 프로젝트 공통 설정: PATH_TMF, KAKAO_API_KEY, FAST_MODE 등
 from recommend.config import *  # noqa: F401,F403
