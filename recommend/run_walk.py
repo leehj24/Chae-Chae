@@ -13,36 +13,25 @@ import unicodedata as ud
 import requests
 import re
 
-# 프로젝트 공통 설정: PATH_TMF, KAKAO_API_KEY, FAST_MODE 등
-from recommend.config import *  # noqa: F401,F403
+from recommend.config import *  # PATH_TMF, KAKAO_API_KEY, FAST_MODE
 
-# ─────────────────────────────────────
-# SLA: 항상 10초 이내 반환을 보장하기 위한 예산
-# ─────────────────────────────────────
-TIME_BUDGET = 9.0  # 초(앱 오버헤드 감안, 여유 1초 남김)
+TIME_BUDGET = 9.0
 WALK_TOP_N_FAST = 120
 WALK_TOP_N_SLOW = 300
 
-# ─────────────────────────────────────
-# 유틸
-# ─────────────────────────────────────
+MEAL_CAT = "음식"
+MEAL_MAIN_KEYWORDS = {"한식", "중식", "일식", "서양식", "이색음식점"}
+CAFE_KEYWORDS = {"카페", "전통찻집"}
+
+LUNCH_START, LUNCH_END = 11 * 60, 13 * 60
+DINNER_START, DINNER_END = 17 * 60, 20 * 60
+NIGHT_AFTER = 20 * 60
+
 def _nfc(s: str) -> str:
     return ud.normalize("NFC", str(s)).strip()
 
 def _check_hhmm(s: str):
     datetime.strptime(s, "%H:%M")
-
-def _haversine_km(lat1, lon1, lat2, lon2) -> float:
-    vals = [lat1, lon1, lat2, lon2]
-    if any(pd.isna(v) for v in vals):
-        return float("inf")
-    R = 6371.0088
-    p1 = math.radians(lat1)
-    p2 = math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
 
 def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8", "utf-8-sig", "cp949"):
@@ -53,7 +42,6 @@ def _read_csv_robust(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 def _geocode_region_kakao(region: str, time_left: float) -> Optional[Tuple[float, float]]:
-    """FAST_MODE면 네트워크 호출 금지. 남은 시간이 2.0s 미만이면 스킵."""
     if FAST_MODE or time_left < 2.0 or not KAKAO_API_KEY:
         return None
     region = _nfc(region)
@@ -67,15 +55,11 @@ def _geocode_region_kakao(region: str, time_left: float) -> Optional[Tuple[float
         docs = r.json().get("documents", [])
         if not docs:
             return None
-        return float(docs[0]["y"]), float(docs[0]["x"])  # lat, lon
+        return float(docs[0]["y"]), float(docs[0]["x"])
     except Exception:
         return None
 
 def _standardize_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    입력 CSV를 표준 컬럼으로 정규화.
-      title, addr1, cat1, cat2, cat3, lon(mapx), lat(mapy), review_score, tour_score
-    """
     cols = {c.lower(): c for c in df.columns}
     need = {
         "title": cols.get("title") or "title",
@@ -109,7 +93,6 @@ def _standardize_cols(df: pd.DataFrame) -> pd.DataFrame:
             std[c] = ""
         std[c] = std[c].fillna("").astype(str)
 
-    # cat3 구분자 정규화: '/', '|', ';', '·' 등을 쉼표로 통일
     std["cat3"] = std["cat3"].str.replace(r"[;/·|]", ",", regex=True)
     std["cat3"] = std["cat3"].str.replace(r"\s*,\s*", ",", regex=True)
 
@@ -130,9 +113,15 @@ def _time_slots_per_day(start_hhmm: str, end_hhmm: str, count: int) -> List[str]
         cur = cur + timedelta(minutes=step)
     return out
 
-# ─────────────────────────────────────
-# 테마 믹스(쿼터 + 라운드로빈)
-# ─────────────────────────────────────
+def _stay_minutes(cat1: str) -> int:
+    if cat1 == "음식":
+        return 75
+    if cat1 == "자연":
+        return 90
+    if cat1 == "레포츠":
+        return 120
+    return 90
+
 def _build_theme_queues(selected_df: pd.DataFrame, cats_norm: List[str]) -> Dict[str, List[int]]:
     queues: Dict[str, List[int]] = {c: [] for c in cats_norm}
     seen = set()
@@ -148,6 +137,22 @@ def _build_theme_queues(selected_df: pd.DataFrame, cats_norm: List[str]) -> Dict
                 break
     return queues
 
+def _build_food_queues(selected_df: pd.DataFrame) -> Dict[str, List[int]]:
+    meal_main, cafe = [], []
+    for i, s in selected_df.iterrows():
+        if str(s.get("cat1","")) != MEAL_CAT:
+            continue
+        c2 = str(s.get("cat2",""))
+        c3 = str(s.get("cat3",""))
+        bag = {t.strip() for t in (c2 + "," + c3).split(",") if t.strip()}
+        if bag & CAFE_KEYWORDS:
+            cafe.append(i)
+        elif bag & MEAL_MAIN_KEYWORDS:
+            meal_main.append(i)
+        else:
+            meal_main.append(i)
+    return {"meal_main": meal_main, "cafe": cafe}
+
 def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
     L = len(cats_norm)
     if L <= 0 or want <= 0:
@@ -155,7 +160,6 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
     if L == 1: weights = [1.0]
     elif L == 2: weights = [0.7, 0.3]
     else: weights = [0.6, 0.3, 0.1][:L]
-
     base = [max(0, int(round(w * want))) for w in weights]
     diff = want - sum(base)
     order = list(range(L))
@@ -169,9 +173,6 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
             if base[j] > 0: base[j] -= 1; diff += 1
     return {cats_norm[i]: base[i] for i in range(L)}
 
-# ─────────────────────────────────────
-# 메인
-# ─────────────────────────────────────
 def run(
     region: str,
     transport_mode: str,
@@ -187,7 +188,6 @@ def run(
     def left():
         return TIME_BUDGET - (time.time() - t0)
 
-    # 입력 검증
     region = _nfc(region)
     assert transport_mode == "walk", "transport_mode='walk' 필요"
     assert isinstance(days, int) and days > 0, "days>0"
@@ -195,36 +195,27 @@ def run(
     assert cats, "최소 1개 테마"
     _check_hhmm(start_time); _check_hhmm(end_time)
 
-    # 데이터 로드/표준화
     df_raw = _read_csv_robust(PATH_TMF)
     df = _standardize_cols(df_raw)
 
-    # 지역 중심좌표
     coords = _geocode_region_kakao(region, left())
     if not coords:
-        # 주소 포함 여부로 1차 필터
         mask_addr = df["addr1"].str.contains(region, na=False)
-        if mask_addr.sum() >= 1:
-            sub = df[mask_addr].copy()
-        else:
-            sub = df.copy()
+        sub = df[mask_addr].copy() if mask_addr.sum() >= 1 else df.copy()
         center_lat = float(sub["lat"].median())
         center_lon = float(sub["lon"].median())
     else:
         center_lat, center_lon = coords
 
-    # 반경/거리 계산(빠른 근사; 걷기 반경 8km)
     df["distance_km"] = np.sqrt(
         np.maximum(0.0, (df["lat"] - center_lat) ** 2 + (df["lon"] - center_lon) ** 2)
     ) * 111.0
     df = df[df["distance_km"] <= 8.0]
 
-    # 시간 임계 시 퀵 폴백
     if left() <= 0.5:
         quick = df.sort_values("distance_km").head(min(days * 4, 24))
         return _rows_to_df_quick(quick, score_label, days, start_time, end_time)
 
-    # 점수(정규화 + 가중합)
     def _minmax(s):
         s = pd.to_numeric(s, errors="coerce").fillna(0)
         mn, mx = float(np.nanmin(s)), float(np.nanmax(s))
@@ -236,7 +227,6 @@ def run(
     rs = _minmax(df.get("review_score", 0.0))
     df["score_for_sort"] = 0.65 * ts + 0.35 * rs
 
-    # 테마 OR 필터 (대소문자 무시)
     cats_norm = cats[:]
     if cats_norm:
         regex = re.compile("|".join(f"({re.escape(x)})" for x in cats_norm), re.IGNORECASE)
@@ -254,11 +244,9 @@ def run(
             "score","score_label","distance_km","mapy","mapx"
         ])
 
-    # 1차 정렬(점수 desc, 거리 asc) + 상한 적용
     top_n = WALK_TOP_N_FAST if FAST_MODE else WALK_TOP_N_SLOW
     df = df.sort_values(by=["score_for_sort", "distance_km"], ascending=[False, True]).head(top_n).reset_index(drop=True)
 
-    # 하루 목표 개수 산정
     max_per_day, min_per_day = 6, 4
     total_quota = min(int(len(df)), days * max_per_day)
     if total_quota < days * min_per_day:
@@ -269,12 +257,19 @@ def run(
     n = len(selected)
     idx_global = 0
     slots_cache: Dict[int, List[str]] = {}
+    used_global = set()
 
-    # 전 일정 중복 방지(같은 장소가 다른 날에 재등장 금지)
-    used_global = set()  # (title, addr1)
+    # ────────────── 커버리지 강제 준비 ──────────────
+    theme_queues_global = _build_theme_queues(selected, cats_norm)
+    coverage_need = {c for c in cats_norm if theme_queues_global.get(c)}  # 후보 있는 테마만
+    coverage_done = set()
+
+    # 음식 설정
+    meal_enabled = (MEAL_CAT in cats_norm)
+    food_queues = _build_food_queues(selected) if meal_enabled else {"meal_main": [], "cafe": []}
 
     for day in range(1, days + 1):
-        if left() < 0.4:  # 시간 임계 → 현재까지 결과로 종료
+        if left() < 0.4:
             break
 
         todays = min(max_per_day, max(min_per_day, int(math.ceil(total_quota / (days - day + 1)))))
@@ -286,12 +281,21 @@ def run(
             slots_cache[todays] = _time_slots_per_day(start_time, end_time, todays)
         slots = slots_cache[todays]
 
-        # 테마 큐 + 쿼터
         theme_queues = _build_theme_queues(selected, cats_norm)
         quota = _allocate_quota_for_day(cats_norm, todays)
 
-        # 팝퍼
-        def _pop_next_from(cat: str):
+        def _pop_from_idx_list(idx_list: List[int]) -> Optional[pd.Series]:
+            while idx_list:
+                i = idx_list.pop(0)
+                rec = selected.loc[i]
+                key = (_nfc(rec.get("title","")), _nfc(rec.get("addr1","")))
+                if key in used_global:
+                    continue
+                used_global.add(key)
+                return rec
+            return None
+
+        def _pop_next_generic(cat: str) -> Optional[pd.Series]:
             q = theme_queues.get(cat)
             while q:
                 i = q.pop(0)
@@ -304,57 +308,125 @@ def run(
             return None
 
         rows_today: List[pd.Series] = []
-
-        # ── 씨드 라운드: 각 테마에서 1개씩 먼저 뽑기(큐/쿼터 있을 때)
-        for c in cats_norm:
-            if quota.get(c, 0) <= 0:
-                continue
-            rec = _pop_next_from(c)
-            if rec is None:
-                continue
-            quota[c] -= 1
-            rows_today.append(rec)
-
-        # ── 라운드로빈으로 잔여 쿼터 채우기
         cat_cursor, L = 0, max(1, len(cats_norm))
-        while len(rows_today) < todays:
+
+        # ────────────── 슬롯별 배치 ──────────────
+        for slot_idx in range(todays):
             if left() < 0.25:
-                break  # 남은 슬롯은 폴백으로 채우거나 종료
+                break
+            start_hm = slots[slot_idx]
+            st_dt = datetime.strptime(start_hm, "%H:%M")
+            cur_min = st_dt.hour * 60 + st_dt.minute
 
             picked = None
-            for _ in range(L):
-                c = cats_norm[cat_cursor % L]; cat_cursor += 1
-                if quota.get(c, 0) <= 0:
-                    continue
-                rec = _pop_next_from(c)
-                if rec is None:
-                    continue
-                quota[c] -= 1
-                picked = rec
-                break
 
+            # 1) 커버리지 우선: 아직 한번도 안나온 테마를 먼저 충족
+            unmet = [c for c in cats_norm if c in coverage_need and c not in coverage_done]
+            if unmet:
+                target = unmet[-1]  # 우선순위가 낮은(리스트의 뒤) 테마부터 강제 충족
+                if target == MEAL_CAT:
+                    if meal_enabled and quota.get(MEAL_CAT, 0) > 0:
+                        if LUNCH_START <= cur_min < LUNCH_END or DINNER_START <= cur_min < DINNER_END:
+                            picked = _pop_from_idx_list(food_queues["meal_main"])
+                            if picked is not None:
+                                quota[MEAL_CAT] -= 1
+                        elif cur_min >= NIGHT_AFTER:
+                            picked = _pop_from_idx_list(food_queues["cafe"])
+                            if picked is not None:
+                                quota[MEAL_CAT] -= 1
+                        # 음식은 지정 시간대 외에는 커버리지도 배치하지 않음(규칙 유지)
+                else:
+                    if quota.get(target, 0) > 0:
+                        cand = _pop_next_generic(target)
+                        if cand is not None:
+                            quota[target] -= 1
+                            picked = cand
+
+                if picked is not None:
+                    coverage_done.add(target)
+
+            # 2) 일반 음식 시간대 강제 (이미 커버리지로 못 넣었을 때)
+            if picked is None and meal_enabled and quota.get(MEAL_CAT, 0) > 0:
+                if LUNCH_START <= cur_min < LUNCH_END or DINNER_START <= cur_min < DINNER_END:
+                    picked = _pop_from_idx_list(food_queues["meal_main"])
+                    if picked is not None:
+                        quota[MEAL_CAT] -= 1
+                        coverage_done.add(MEAL_CAT)
+                elif cur_min >= NIGHT_AFTER:
+                    picked = _pop_from_idx_list(food_queues["cafe"])
+                    if picked is not None:
+                        quota[MEAL_CAT] -= 1
+                        coverage_done.add(MEAL_CAT)
+
+            # 3) 라운드로빈(비중 분배)
             if picked is None:
-                # 모든 큐가 비었으면 글로벌 상위 정렬 순서로 채움
-                while idx_global < n and len(rows_today) < todays:
-                    rec = selected.iloc[idx_global]; idx_global += 1
-                    key = (_nfc(rec.get("title","")), _nfc(rec.get("addr1","")))
+                for _ in range(L):
+                    c = cats_norm[cat_cursor % L]; cat_cursor += 1
+                    if c == MEAL_CAT:
+                        if not (meal_enabled and quota.get(MEAL_CAT, 0) > 0):
+                            continue
+                        if LUNCH_START <= cur_min < LUNCH_END or DINNER_START <= cur_min < DINNER_END:
+                            cand = _pop_from_idx_list(food_queues["meal_main"])
+                            if cand is not None:
+                                quota[MEAL_CAT] -= 1
+                                picked = cand
+                                break
+                        elif cur_min >= NIGHT_AFTER:
+                            cand = _pop_from_idx_list(food_queues["cafe"])
+                            if cand is not None:
+                                quota[MEAL_CAT] -= 1
+                                picked = cand
+                                break
+                        else:
+                            continue  # 음식은 지정 시간대 외 미배치
+                    else:
+                        if quota.get(c, 0) <= 0:
+                            continue
+                        cand = _pop_next_generic(c)
+                        if cand is None:
+                            continue
+                        quota[c] -= 1
+                        picked = cand
+                        break
+
+            # 4) 글로벌 폴백 (음식 시간대 규칙은 여전히 준수)
+            if picked is None:
+                while idx_global < n:
+                    cand = selected.iloc[idx_global]; idx_global += 1
+                    key = (_nfc(cand.get("title","")), _nfc(cand.get("addr1","")))
                     if key in used_global:
                         continue
+                    if meal_enabled and str(cand.get("cat1","")) == MEAL_CAT:
+                        tags = {t.strip() for t in (str(cand.get("cat2","")) + "," + str(cand.get("cat3",""))).split(",") if t.strip()}
+                        is_cafe = bool(tags & CAFE_KEYWORDS)
+                        is_main = bool(tags & MEAL_MAIN_KEYWORDS) or not is_cafe
+                        if LUNCH_START <= cur_min < LUNCH_END or DINNER_START <= cur_min < DINNER_END:
+                            if not is_main:
+                                continue
+                        elif cur_min >= NIGHT_AFTER:
+                            if not is_cafe:
+                                continue
+                        else:
+                            continue
                     used_global.add(key)
-                    picked = rec
-                    break
-                if picked is None:
+                    picked = cand
                     break
 
-            rows_today.append(picked)
+            if picked is not None:
+                rows_today.append(picked)
+                # 커버리지 업데이트(비음식 테마 포함)
+                tcat = str(picked.get("cat1",""))
+                if tcat in coverage_need:
+                    coverage_done.add(tcat)
 
-        # ── rows_today를 타임슬롯에 배치
+        # 타임슬롯 배치
         for i, picked in enumerate(rows_today[:todays]):
-            start_hm = slots[i]
-            end_hm = (datetime.strptime(start_hm, "%H:%M") + timedelta(minutes=90)).strftime("%H:%M")
+            st = slots[i]
+            stay = _stay_minutes(str(picked.get("cat1","")))
+            et = (datetime.strptime(st, "%H:%M") + timedelta(minutes=stay)).strftime("%H:%M")
             rows.append({
                 "day": day, "day_label": f"{day}일차",
-                "start_time": start_hm, "end_time": end_hm,
+                "start_time": st, "end_time": et,
                 "title": picked.get("title"), "addr1": picked.get("addr1"),
                 "cat1": picked.get("cat1"), "cat2": picked.get("cat2"), "cat3": picked.get("cat3"),
                 "score": float(picked.get("score_for_sort", 0.0)), "score_label": score_label,
@@ -369,9 +441,6 @@ def run(
     result = pd.DataFrame(rows)
     return result
 
-# ─────────────────────────────────────
-# 긴급 폴백(시간 임박시 즉시 반환용)
-# ─────────────────────────────────────
 def _rows_to_df_quick(df: pd.DataFrame, score_label: str, days: int, start_time: str, end_time: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=[
@@ -393,7 +462,8 @@ def _rows_to_df_quick(df: pd.DataFrame, score_label: str, days: int, start_time:
                 continue
             used.add(key)
             st = slots_cache[per_day][k]
-            et = (datetime.strptime(st, "%H:%M") + timedelta(minutes=90)).strftime("%H:%M")
+            stay = _stay_minutes(str(r.get("cat1","")))
+            et = (datetime.strptime(st, "%H:%M") + timedelta(minutes=stay)).strftime("%H:%M")
             rows.append({
                 "day": day, "day_label": f"{day}일차",
                 "start_time": st, "end_time": et,
