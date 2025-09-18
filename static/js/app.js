@@ -114,7 +114,7 @@
 
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-      if (isNaN(diffDays) || diffDays < 1 || diffDays > 100) {
+      if (isNaN(diffDays) || diffDays < 1 || diffDays > 10) {
         daysPreview.textContent = '범위 오류';
         submitBtn.disabled = true;
       } else {

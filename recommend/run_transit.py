@@ -38,7 +38,7 @@ def run(
         raise ValueError("점수 기준은 '인기도지수' 또는 '관광지수' 중 선택하세요.")
     if not isinstance(days, int) or days <= 0:
         raise ValueError("여행 일수를 1 이상으로 지정하세요.")
-    days = max(1, min(100, int(days)))
+    days = max(1, min(10, int(days)))
 
     cats = list(dict.fromkeys([_nfc(c) for c in (cats or [])]))
     if not cats:

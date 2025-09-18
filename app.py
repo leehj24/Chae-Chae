@@ -598,7 +598,7 @@ def chat():
             start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
             end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
             days = (end - start).days + 1
-            if 1 <= days <= 100:
+            if 1 <= days <= 10:
                 session["start_date"], session["end_date"], session["days"] = start_date_str, end_date_str, days
                 user_text = f"{start_date_str} ~ {end_date_str} (총 {days}일)"
                 messages.append({"sender": "user", "text": user_text})

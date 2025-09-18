@@ -223,7 +223,7 @@ def run(
     region = _nfc(region)
     if transport_mode not in {"walk", "transit"}:
         transport_mode = "walk"
-    days = max(1, int(days))
+    days = max(1, min(10, int(days)))
     cats_norm = _normalize_cats(cats)
     score_col = _choose_score_col(score_label)
 
