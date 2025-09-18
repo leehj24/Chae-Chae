@@ -72,6 +72,10 @@ def _geocode_region_kakao(region: str, time_left: float) -> Optional[Tuple[float
         return None
 
 def _standardize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    입력 CSV를 표준 컬럼으로 정규화.
+      title, addr1, cat1, cat2, cat3, lon(mapx), lat(mapy), review_score, tour_score
+    """
     cols = {c.lower(): c for c in df.columns}
     need = {
         "title": cols.get("title") or "title",
@@ -104,6 +108,10 @@ def _standardize_cols(df: pd.DataFrame) -> pd.DataFrame:
         if c not in std.columns:
             std[c] = ""
         std[c] = std[c].fillna("").astype(str)
+
+    # cat3 구분자 정규화: '/', '|', ';', '·' 등을 쉼표로 통일
+    std["cat3"] = std["cat3"].str.replace(r"[;/·|]", ",", regex=True)
+    std["cat3"] = std["cat3"].str.replace(r"\s*,\s*", ",", regex=True)
 
     std = std.dropna(subset=["lon", "lat"]).copy()
     return std
@@ -188,7 +196,7 @@ def run(
     _check_hhmm(start_time); _check_hhmm(end_time)
 
     # 데이터 로드/표준화
-    df_raw = _read_csv_robust(PATH_TMF)  # 경로는 config에서 관리 :contentReference[oaicite:1]{index=1}
+    df_raw = _read_csv_robust(PATH_TMF)
     df = _standardize_cols(df_raw)
 
     # 지역 중심좌표
@@ -205,19 +213,14 @@ def run(
     else:
         center_lat, center_lon = coords
 
-    # 반경/거리 계산(벡터)
+    # 반경/거리 계산(빠른 근사; 걷기 반경 8km)
     df["distance_km"] = np.sqrt(
-        np.maximum(
-            0.0,
-            ((df["lat"] - center_lat) ** 2 + (df["lon"] - center_lon) ** 2)
-        )
-    ) * 111.0  # 대략적 환산(하버사인보다 빠름)
-    # 걷기 반경
-    radius_km = 8.0
-    df = df[df["distance_km"] <= radius_km]
+        np.maximum(0.0, (df["lat"] - center_lat) ** 2 + (df["lon"] - center_lon) ** 2)
+    ) * 111.0
+    df = df[df["distance_km"] <= 8.0]
 
+    # 시간 임계 시 퀵 폴백
     if left() <= 0.5:
-        # 시간 초과 임박 → 상위 몇 개만 골라 즉시 반환
         quick = df.sort_values("distance_km").head(min(days * 4, 24))
         return _rows_to_df_quick(quick, score_label, days, start_time, end_time)
 
@@ -233,7 +236,7 @@ def run(
     rs = _minmax(df.get("review_score", 0.0))
     df["score_for_sort"] = 0.65 * ts + 0.35 * rs
 
-    # 테마 OR 필터
+    # 테마 OR 필터 (대소문자 무시)
     cats_norm = cats[:]
     if cats_norm:
         regex = re.compile("|".join(f"({re.escape(x)})" for x in cats_norm), re.IGNORECASE)
@@ -252,7 +255,7 @@ def run(
         ])
 
     # 1차 정렬(점수 desc, 거리 asc) + 상한 적용
-    top_n = WALK_TOP_N_FAST if FAST_MODE else WALK_TOP_N_SLOW  # :contentReference[oaicite:2]{index=2}
+    top_n = WALK_TOP_N_FAST if FAST_MODE else WALK_TOP_N_SLOW
     df = df.sort_values(by=["score_for_sort", "distance_km"], ascending=[False, True]).head(top_n).reset_index(drop=True)
 
     # 하루 목표 개수 산정
@@ -267,13 +270,17 @@ def run(
     idx_global = 0
     slots_cache: Dict[int, List[str]] = {}
 
+    # 전 일정 중복 방지(같은 장소가 다른 날에 재등장 금지)
+    used_global = set()  # (title, addr1)
+
     for day in range(1, days + 1):
         if left() < 0.4:  # 시간 임계 → 현재까지 결과로 종료
             break
 
         todays = min(max_per_day, max(min_per_day, int(math.ceil(total_quota / (days - day + 1)))))
         todays = min(todays, n)
-        if todays <= 0: break
+        if todays <= 0:
+            break
 
         if todays not in slots_cache:
             slots_cache[todays] = _time_slots_per_day(start_time, end_time, todays)
@@ -283,39 +290,67 @@ def run(
         theme_queues = _build_theme_queues(selected, cats_norm)
         quota = _allocate_quota_for_day(cats_norm, todays)
 
-        used_keys = set()
+        # 팝퍼
         def _pop_next_from(cat: str):
             q = theme_queues.get(cat)
             while q:
                 i = q.pop(0)
                 rec = selected.loc[i]
                 key = (_nfc(rec.get("title","")), _nfc(rec.get("addr1","")))
-                if key not in used_keys:
-                    used_keys.add(key); return rec
+                if key in used_global:
+                    continue
+                used_global.add(key)
+                return rec
             return None
 
-        taken, cat_cursor, L = 0, 0, max(1, len(cats_norm))
-        while taken < todays:
+        rows_today: List[pd.Series] = []
+
+        # ── 씨드 라운드: 각 테마에서 1개씩 먼저 뽑기(큐/쿼터 있을 때)
+        for c in cats_norm:
+            if quota.get(c, 0) <= 0:
+                continue
+            rec = _pop_next_from(c)
+            if rec is None:
+                continue
+            quota[c] -= 1
+            rows_today.append(rec)
+
+        # ── 라운드로빈으로 잔여 쿼터 채우기
+        cat_cursor, L = 0, max(1, len(cats_norm))
+        while len(rows_today) < todays:
             if left() < 0.25:
-                break  # 남은 슬롯은 폴백으로 채우거나 루프 종료
+                break  # 남은 슬롯은 폴백으로 채우거나 종료
 
             picked = None
             for _ in range(L):
                 c = cats_norm[cat_cursor % L]; cat_cursor += 1
-                if quota.get(c, 0) <= 0: continue
+                if quota.get(c, 0) <= 0:
+                    continue
                 rec = _pop_next_from(c)
-                if rec is None: continue
-                quota[c] -= 1; picked = rec; break
+                if rec is None:
+                    continue
+                quota[c] -= 1
+                picked = rec
+                break
 
             if picked is None:
-                while idx_global < n and taken < todays:
+                # 모든 큐가 비었으면 글로벌 상위 정렬 순서로 채움
+                while idx_global < n and len(rows_today) < todays:
                     rec = selected.iloc[idx_global]; idx_global += 1
                     key = (_nfc(rec.get("title","")), _nfc(rec.get("addr1","")))
-                    if key in used_keys: continue
-                    picked = rec; break
-                if picked is None: break
+                    if key in used_global:
+                        continue
+                    used_global.add(key)
+                    picked = rec
+                    break
+                if picked is None:
+                    break
 
-            start_hm = slots[taken]
+            rows_today.append(picked)
+
+        # ── rows_today를 타임슬롯에 배치
+        for i, picked in enumerate(rows_today[:todays]):
+            start_hm = slots[i]
             end_hm = (datetime.strptime(start_hm, "%H:%M") + timedelta(minutes=90)).strftime("%H:%M")
             rows.append({
                 "day": day, "day_label": f"{day}일차",
@@ -326,10 +361,10 @@ def run(
                 "distance_km": float(picked.get("distance_km", np.nan)),
                 "mapy": float(picked.get("lat", np.nan)), "mapx": float(picked.get("lon", np.nan)),
             })
-            taken += 1
 
-        total_quota -= taken
-        if total_quota <= 0: break
+        total_quota -= min(todays, len(rows_today))
+        if total_quota <= 0:
+            break
 
     result = pd.DataFrame(rows)
     return result
@@ -348,10 +383,15 @@ def _rows_to_df_quick(df: pd.DataFrame, score_label: str, days: int, start_time:
     slots_cache = {per_day: _time_slots_per_day(start_time, end_time, per_day)}
     rows = []
     i = 0
+    used = set()
     for day in range(1, days+1):
         for k in range(per_day):
             if i >= len(df): break
             r = df.iloc[i]; i += 1
+            key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+            if key in used:
+                continue
+            used.add(key)
             st = slots_cache[per_day][k]
             et = (datetime.strptime(st, "%H:%M") + timedelta(minutes=90)).strftime("%H:%M")
             rows.append({
