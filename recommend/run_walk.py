@@ -236,7 +236,8 @@ def run(
     # 테마 OR 필터
     cats_norm = cats[:]
     if cats_norm:
-        pat = "|".join(map(lambda x: f"({pd.re.escape(x)})", cats_norm))
+        pat = "|".join(f"({re.escape(x)})" for x in cats_norm)
+        regex = re.compile("|".join(f"({re.escape(x)})" for x in cats_norm), re.IGNORECASE)
         mask = (
             df["cat1"].str.contains(pat, na=False)
             | df["cat2"].str.contains(pat, na=False)
