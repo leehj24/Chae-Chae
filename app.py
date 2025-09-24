@@ -1,4 +1,4 @@
-# app.py (KakaoTalk 메시지 보내기 적용 최종본)
+######## app.py (KakaoTalk 메시지 보내기 적용 최종본)
 
 import json
 import math
@@ -490,6 +490,87 @@ def upload_image():
     return _json({"ok": True, "images": all_images})
 
 
+# =========================
+# ▼▼▼ 여기부터 변경 추가 ▼▼▼
+# =========================
+import difflib  # ← 추가
+
+REGION_SUFFIXES_L1 = ("시", "도", "특별시", "광역시", "자치시")
+REGION_SUFFIXES_L2 = ("구", "군", "시")
+
+def _extract_region_prefix(addr1: str) -> str:
+    """
+    addr1의 앞부분에서 '시/도' + '시/구/군'까지 추출.
+    예: '서울특별시 용산구 한강로3가...' -> '서울특별시 용산구'
+        '경기도 성남시 분당구...'       -> '경기도 성남시 분당구'
+    """
+    if not addr1:
+        return ""
+    toks = _nfc(addr1).split()
+    if not toks:
+        return ""
+    t1 = toks[0]
+    t2 = toks[1] if len(toks) >= 2 else ""
+
+    def _endswith_any(s: str, suffixes: tuple[str, ...]) -> bool:
+        return any(s.endswith(suf) for suf in suffixes)
+
+    if _endswith_any(t1, REGION_SUFFIXES_L1):
+        if t2 and _endswith_any(t2, REGION_SUFFIXES_L2):
+            return f"{t1} {t2}"
+        return t1
+    if _endswith_any(t1, REGION_SUFFIXES_L2):
+        if t2 and _endswith_any(t2, REGION_SUFFIXES_L2):
+            return f"{t1} {t2}"
+        return t1
+    return t1
+
+def _pick_coords_from_dataset(title: str, addr1: str) -> Optional[Tuple[float, float]]:
+    """
+    동일 title 여러 행 중에서 addr1 기반으로 가장 적합한 행을 고르고 (lat, lon)=(mapy, mapx) 반환.
+    우선순위: ① addr1 완전일치 → ② 지역 프리픽스 startswith → ③ 유사도 최고.
+    """
+    try:
+        if PLACES_DF is None or not title:
+            return None
+
+        cand = PLACES_DF[PLACES_DF['title'].astype('object') == _nfc(title)]
+        if cand.empty:
+            return None
+
+        # ① 완전 일치
+        exact = cand[cand['addr1'].astype('object') == _nfc(addr1)]
+        if not exact.empty:
+            row = exact.iloc[0]
+            lat, lon = float(row.get('mapy', float('nan'))), float(row.get('mapx', float('nan')))
+            if not (math.isnan(lat) or math.isnan(lon)):
+                return (lat, lon)
+
+        # ② 지역 프리픽스
+        prefix = _extract_region_prefix(addr1)
+        if prefix:
+            pref_cand = cand[cand['addr1'].astype('object').str.startswith(prefix, na=False)]
+            if not pref_cand.empty:
+                row = pref_cand.iloc[0]
+                lat, lon = float(row.get('mapy', float('nan'))), float(row.get('mapx', float('nan')))
+                if not (math.isnan(lat) or math.isnan(lon)):
+                    return (lat, lon)
+
+        # ③ 문자열 유사도
+        cand = cand.copy()
+        cand['__sim'] = cand['addr1'].astype(str).apply(lambda s: difflib.SequenceMatcher(a=s, b=_nfc(addr1)).ratio())
+        best = cand.sort_values('__sim', ascending=False).iloc[0]
+        lat, lon = float(best.get('mapy', float('nan'))), float(best.get('mapx', float('nan')))
+        if not (math.isnan(lat) or math.isnan(lon)):
+            return (lat, lon)
+    except Exception:
+        pass
+    return None
+# =========================
+# ▲▲▲ 변경 추가 끝 ▲▲▲
+# =========================
+
+
 def _kakao_geocode_coords(query: str, addr1: str = "") -> Optional[Tuple[float, float]]:
     if not KAKAO_API_KEY: return None
     _ensure_session()
@@ -800,7 +881,11 @@ def api_place_media():
 
     images = _get_all_images_for_place(title, addr1, firstimage_url, max_n=4, include_user_uploads=True, auto_fetch_if_needed=True)
     
-    coords = _kakao_geocode_coords(title, addr1)
+    # ▼▼▼ 변경: 데이터셋(mapx/mapy) 우선 → 실패 시 지오코딩 ▼▼▼
+    coords = _pick_coords_from_dataset(title, addr1)
+    if not coords:
+        coords = _kakao_geocode_coords(title, addr1)
+    # ▲▲▲ 변경 끝 ▲▲▲
     
     payload: Dict[str, Any] = {"ok": True, "images": images}
     if coords:
@@ -817,9 +902,26 @@ def api_place_details():
     if not title or not addr1:
         return _json({"ok": False, "error": "title, addr1이 필요합니다."}, 400)
 
-    kakao_url = _get_kakao_place_url(title, mapx, mapy)
+    # ▼▼▼ 변경: 카카오 URL 좌표 소스 우선순위 (데이터셋 → 클라 mapx/mapy → 지오코딩) ▼▼▼
+    target = _pick_coords_from_dataset(title, addr1)
+    if not target and mapx and mapy:
+        try:
+            lat = float(mapy); lon = float(mapx)
+            if not (math.isnan(lat) or math.isnan(lon)):
+                target = (lat, lon)
+        except Exception:
+            target = None
+    if not target:
+        target = _kakao_geocode_coords(query=title, addr1=addr1)
+
+    if target:
+        y_str, x_str = f"{target[0]}", f"{target[1]}"
+    else:
+        y_str = x_str = ""
+    kakao_url = _get_kakao_place_url(title, x_str, y_str)
     if kakao_url and kakao_url.startswith("http://"):
         kakao_url = kakao_url.replace("http://", "https://", 1)
+    # ▲▲▲ 변경 끝 ▲▲▲
 
     key = f"{title}|{addr1}"
     reviews_db = _load_user_reviews()
