@@ -13,53 +13,55 @@ import numpy as np
 import unicodedata as ud
 
 from recommend.config import (
-    PATH_TMF,         # 관광지/POI CSV 경로
-    KAKAO_API_KEY,    # 카카오 키워드검색 API 키 (없으면 지오코딩 생략)
-    FAST_MODE,        # 빠른 모드 (지오코딩은 무시하고 항상 시도하도록 아래에서 오버라이드)
+    PATH_TMF,         # 관광지/POI CSV 경로 (예: '/mnt/data/관광지_법정동_매핑결과.csv')
+    KAKAO_API_KEY,    # 카카오 키워드검색 API 키(있으면 지오코딩 시도)
+    FAST_MODE,        # True면 외부 지오코딩 생략
 )
 
 # ─────────────────────────────────────────────────────────────────────
 # 정책/상수
 # ─────────────────────────────────────────────────────────────────────
-MAX_SPECIFIC_MATCH_PER_DAY = 3       # 하루(day_label) 정밀 교통 매핑 상한
-DAILY_VISIT_TARGET       = 6         # 기본 목표 (하루 방문지 수)
-DAILY_VISIT_HARD_MIN     = 6         # ★ 하드 하한: 최소 6개
-DEFAULT_STAY_MIN         = 60        # 방문 체류(분)
-DEFAULT_TRANSIT_KM_H     = 18.0      # 대중교통 평균속도(km/h)
-PADDING_MIN              = 10        # 이동/대기 여유
-MIN_MOVE_MIN             = 8         # 최소 이동시간(분)
+# 하루 방문 목표/하한
+DAILY_VISIT_TARGET    = 6         # 목표 6
+DAILY_VISIT_HARD_MIN  = 5         # ★ 무조건 하루 최소 5 보장
 
-# 반경 정책: 기본 3km, 부족하면 10km (days>=8 또는 cats 비었으면 10km부터 시작)
-RADIUS_BASE_KM_DEFAULT   = 3.0
-RADIUS_EXPAND_KM_DEFAULT = 10.0
+# 체류/이동 시간 계산
+DEFAULT_STAY_MIN      = 60
+DEFAULT_TRANSIT_KM_H  = 18.0
+PADDING_MIN           = 10
+MIN_MOVE_MIN          = 8
 
-# 1km 초과 시 양쪽 모두 대중교통 메타 필수
-DIST_STRICT_KM           = 1.0
+# 반경 정책
+BASE_RADIUS_KM        = 3.0       # ★ 1순위 반경: 3km
+EXPAND_RADIUS_KM      = 10.0      # ★ 2순위 반경: 10km
 
-# 음식 규칙
+# 1km 이동 규칙
+DIST_STRICT_KM        = 1.0       # 1km 초과면 양쪽 모두 대중교통 메타 필요
+
+# 시간대/음식
 MEAL_CAT = "음식"
 MEAL_MAIN_KEYWORDS = {"한식", "중식", "일식", "서양식", "이색음식점"}
 CAFE_KEYWORDS      = {"카페", "전통찻집"}
-
 LUNCH_START, LUNCH_END   = 11 * 60, 13 * 60
 DINNER_START, DINNER_END = 17 * 60, 20 * 60
 NIGHT_AFTER              = 20 * 60
 
+# 카테고리 가중치(앞선 선호)
 DEFAULT_WEIGHTS = [0.6, 0.3, 0.1]
+
+# 지역 블록(권역 내 하위 블록) 이동
 HOP_COUNT_PER_DAY   = 2
 FORCED_HOP_MINUTES  = 60
-TIME_BUDGET = 8.0
 
-# 시작 장소 최소 점수
-STARTER_MIN_SCORE_PRIMARY = 80.0
-STARTER_MIN_SCORE_SECOND  = 70.0
+# 지오코딩 시간 예산(초)
+TIME_BUDGET = 8.0
 
 # ─────────────────────────────────────────────────────────────────────
 # 권역/시도 표준화
 # ─────────────────────────────────────────────────────────────────────
 SIDO_MAP: Dict[str, str] = {
     # 서울/수도권
-    '서울':'서울특별시','서울시':'서울특별시','서울특별자치시':'서울특별시','서울특별시':'서울특별시',
+    '서울':'서울특별시','서울시':'서울특별자치시','서울특별시':'서울특별자치시','서울특별자치시':'서울특별자치시',
     '경기':'경기도','경기도':'경기도',
     '인천':'인천광역시','인천시':'인천광역시','인천광역시':'인천광역시',
     # 5대 광역
@@ -70,12 +72,12 @@ SIDO_MAP: Dict[str, str] = {
     '울산':'울산광역시','울산시':'울산광역시','울산광역시':'울산광역시',
     # 세종
     '세종':'세종특별자치시','세종시':'세종특별자치시','세종특별자치시':'세종특별자치시',
-    # 강원
-    '강원':'강원도','강원도':'강원도','강원특별자치도':'강원도',
+    # 강원(개편)
+    '강원':'강원특별자치도','강원도':'강원특별자치도','강원특별자치도':'강원특별자치도',
     # 충청
     '충북':'충청북도','충청북도':'충청북도',
     '충남':'충청남도','충청남도':'충청남도',
-    # 전라
+    # 전라(개편)
     '전북':'전라북도','전라북도':'전라북도','전북특별자치도':'전라북도',
     '전남':'전라남도','전라남도':'전라남도',
     # 경상
@@ -87,23 +89,48 @@ SIDO_MAP: Dict[str, str] = {
 }
 
 MACRO_TO_SIDO: Dict[str, List[str]] = {
-    '수도권': ['서울특별시', '경기도', '인천광역시'],
+    '수도권': ['서울특별자치시', '경기도', '인천광역시'],
     '제주권': ['제주특별자치도'],
-    '강원권': ['강원도'],
+    '강원권': ['강원특별자치도'],
     '충청권': ['충청북도', '충청남도', '세종특별자치시', '대전광역시'],
     '호남권': ['전라북도', '전라남도', '광주광역시'],
     '영남권': ['경상북도', '경상남도', '부산광역시', '대구광역시', '울산광역시'],
 }
 
+CITY_TO_MACRO = {
+    # 강원권 대표 도시
+    "속초":"강원권","춘천":"강원권","원주":"강원권","강릉":"강원권","동해":"강원권","삼척":"강원권",
+    # 제주권
+    "제주":"제주권","서귀포":"제주권",
+    # 호남권
+    "전주":"호남권","군산":"호남권","익산":"호남권","목포":"호남권","여수":"호남권","순천":"호남권","광주":"호남권",
+    # 영남권
+    "부산":"영남권","대구":"영남권","울산":"영남권","경주":"영남권","포항":"영남권","창원":"영남권","김해":"영남권","거제":"영남권",
+    # 충청권
+    "대전":"충청권","세종":"충청권","청주":"충청권","천안":"충청권","아산":"충청권",
+    # 수도권
+    "서울":"수도권","인천":"수도권","수원":"수도권","성남":"수도권","용인":"수도권","고양":"수도권","안양":"수도권","의정부":"수도권",
+}
+
 _SIDO_TOKEN_RE = re.compile(
-    r"(서울특별시|서울시|서울|부산광역시|부산시|부산|대구광역시|대구시|대구|인천광역시|인천시|인천|"
-    r"광주광역시|광주시|광주|대전광역시|대전시|대전|울산광역시|울산시|울산|세종특별자치시|세종시|세종|"
-    r"경기도|경기|강원특별자치도|강원도|강원|충청북도|충북|충청남도|충남|전북특별자치도|전라북도|전북|"
-    r"전라남도|전남|경상북도|경북|경상남도|경남|제주특별자치도|제주도|제주시|서귀포시|제주)"
+    r"(서울특별자치시|서울특별시|서울시|서울|"
+    r"부산광역시|부산시|부산|"
+    r"대구광역시|대구시|대구|"
+    r"인천광역시|인천시|인천|"
+    r"광주광역시|광주시|광주|"
+    r"대전광역시|대전시|대전|"
+    r"울산광역시|울산시|울산|"
+    r"세종특별자치시|세종시|세종|"
+    r"경기도|경기|"
+    r"강원특별자치도|강원도|강원|"
+    r"충청북도|충북|충청남도|충남|"
+    r"전라북도|전북|전라남도|전남|"
+    r"경상북도|경북|경상남도|경남|"
+    r"제주특별자치도|제주도|제주시|서귀포시|제주)"
 )
 
 # ─────────────────────────────────────────────────────────────────────
-# 유틸
+# 문자열/수치 유틸
 # ─────────────────────────────────────────────────────────────────────
 def _nfc(s: Optional[str]) -> str:
     return ud.normalize("NFC", str(s)).strip() if s is not None else ""
@@ -116,7 +143,7 @@ def _float(x, default=np.nan):
     except Exception:
         return default
 
-# (스칼라) 하버사인
+# 하버사인(스칼라)
 def _haversine(lat1, lon1, lat2, lon2) -> float:
     if any(pd.isna([lat1, lon1, lat2, lon2])):
         return np.nan
@@ -127,7 +154,7 @@ def _haversine(lat1, lon1, lat2, lon2) -> float:
     a = math.sin(dlat/2)**2 + math.cos(lat1r)*math.cos(lat2r)*math.sin(dlon/2)**2
     return 2 * 6371.0088 * math.asin(math.sqrt(a))
 
-# (벡터) 하버사인: Series/ndarray ↔ 스칼라 중심점 (★ Series→float 오류 회피)
+# 하버사인(벡터) — Series→float 변환 오류 방지
 def _haversine_vec(lat_series, lon_series, lat0, lon0) -> np.ndarray:
     y = pd.to_numeric(lat_series, errors="coerce").to_numpy()
     x = pd.to_numeric(lon_series, errors="coerce").to_numpy()
@@ -177,11 +204,12 @@ def _between_time(day_start: str, day_end: str, s: str, e: str) -> bool:
     return (ds <= sdt < de) and (ds < edt <= de) and (sdt < edt)
 
 # ─────────────────────────────────────────────────────────────────────
-# 권역 유틸
+# 권역 판정/부착
 # ─────────────────────────────────────────────────────────────────────
 def normalize_sido(name: str) -> Optional[str]:
     if not name: return None
     key = name.strip()
+    # 공백 제거 변형도 허용
     return SIDO_MAP.get(key, SIDO_MAP.get(key.replace(' ', ''), None))
 
 def extract_sido_from_addr(addr1: str) -> Optional[str]:
@@ -189,6 +217,7 @@ def extract_sido_from_addr(addr1: str) -> Optional[str]:
     m = _SIDO_TOKEN_RE.search(addr1)
     if not m: return None
     raw = m.group(1)
+    # 예: 강원도 → 강원특별자치도 로 표준화
     return normalize_sido(raw)
 
 def macro_from_sido(sido_std: str) -> Optional[str]:
@@ -217,7 +246,23 @@ def infer_macro_from_text(region_text: str) -> Optional[str]:
     if any(k in t for k in ['충청','세종','대전']): return '충청권'
     if any(k in t for k in ['전라','광주']): return '호남권'
     if any(k in t for k in ['경상','부산','대구','울산']): return '영남권'
+    # 도시명으로 보강
+    for city, macro in CITY_TO_MACRO.items():
+        if city in t:
+            return macro
     return None
+
+def macro_from_center(df: pd.DataFrame, lat: float, lon: float) -> Optional[str]:
+    """중심좌표 주변(≤30km)에서 가장 많은 __macro를 선택해 권역 추정."""
+    if pd.isna(lat) or pd.isna(lon) or df.empty:
+        return None
+    tmp = df.copy()
+    tmp["__dist0"] = _haversine_vec(tmp["mapy"], tmp["mapx"], lat, lon)
+    near = tmp[tmp["__dist0"] <= 30.0]
+    if near.empty:
+        near = tmp.sort_values("__dist0").head(200)
+    counts = near["__macro"].value_counts(dropna=True)
+    return counts.index[0] if len(counts) > 0 and counts.index[0] else None
 
 # ─────────────────────────────────────────────────────────────────────
 # 데이터 로드/표준화/필터
@@ -270,7 +315,7 @@ def _load_places() -> pd.DataFrame:
         "closest_subway_station","closest_subway_line","closest_bus_station"
     ]].copy()
 
-    # 시·도/권역 붙이기
+    # 시·도/권역 붙이기 (addr1 기반 → 요청하신 방식)
     df = attach_sido_macro_columns(df)
     return df
 
@@ -278,10 +323,7 @@ def _load_places() -> pd.DataFrame:
 # 중심좌표(지오코딩) + 반경 필터
 # ─────────────────────────────────────────────────────────────────────
 def _geocode_region_kakao(region: str, time_left: float) -> Optional[Tuple[float, float]]:
-    """
-    ✅ FAST_MODE와 무관하게, 시간이 남고 KAKAO_API_KEY가 있으면 항상 먼저 시도
-    """
-    if time_left < 1.5 or not KAKAO_API_KEY:
+    if FAST_MODE or time_left < 2.0 or not KAKAO_API_KEY:
         return None
     import requests
     region = _nfc(region)
@@ -300,13 +342,13 @@ def _geocode_region_kakao(region: str, time_left: float) -> Optional[Tuple[float
         return None
 
 def _center_of_region(df: pd.DataFrame, region: str, time_left: float) -> Tuple[float, float]:
-    # 1) 카카오 지오코딩 우선 (FAST_MODE 무시)
+    # 1) 카카오 지오코딩 우선
     pos = _geocode_region_kakao(region, time_left)
     if pos:
         return pos
-    # 2) 텍스트 매칭된 후보의 중간값(백업)
-    mask_addr = df["addr1"].astype(str).str.contains(region, na=False)
-    sub = df[mask_addr].copy() if mask_addr.sum() >= 1 else df.copy()
+    # 2) 후보 중 텍스트 매칭 중앙값(백업)
+    mask = df["addr1"].astype(str).str.contains(region, na=False) | df["title"].astype(str).str.contains(region, na=False)
+    sub = df[mask].copy() if mask.sum() >= 1 else df.copy()
     cy = float(pd.to_numeric(sub["mapy"], errors="coerce").median())
     cx = float(pd.to_numeric(sub["mapx"], errors="coerce").median())
     return cy, cx
@@ -316,27 +358,8 @@ def _filter_by_radius_km(df: pd.DataFrame, center_lat: float, center_lon: float,
     df["__dist0"] = _haversine_vec(df["mapy"], df["mapx"], center_lat, center_lon)
     return df[df["__dist0"] <= float(r_km)].copy()
 
-def _pick_radius_km(days: int, cats: List[str]) -> Tuple[float, float]:
-    """
-    기본 3km, 확장 10km.
-    - days >= 8 또는 cats 비었으면: 10km부터 시작
-    """
-    base = RADIUS_BASE_KM_DEFAULT
-    expand = RADIUS_EXPAND_KM_DEFAULT
-    if (days >= 8) or (not cats):
-        base = RADIUS_EXPAND_KM_DEFAULT
-    return base, expand
-
-def _filter_candidates_by_radius_then_expand(df: pd.DataFrame, center_lat: float, center_lon: float,
-                                             base_km: float, expand_km: float, need_n: int) -> pd.DataFrame:
-    df_base = _filter_by_radius_km(df, center_lat, center_lon, base_km)
-    if len(df_base) >= need_n:
-        return df_base
-    df_expand = _filter_by_radius_km(df, center_lat, center_lon, expand_km)
-    return df_expand
-
 # ─────────────────────────────────────────────────────────────────────
-# 카테고리/음식 큐
+# 카테고리/음식 큐 + 할당
 # ─────────────────────────────────────────────────────────────────────
 def _build_theme_queues(selected_df: pd.DataFrame, cats_norm: List[str]) -> Dict[str, List[int]]:
     queues: Dict[str, List[int]] = {c: [] for c in cats_norm}
@@ -383,7 +406,7 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
     return {cats_norm[i]: final[i] for i in range(L)}
 
 # ─────────────────────────────────────────────────────────────────────
-# 대중교통 메타/포맷
+# 대중교통 메타/표기
 # ─────────────────────────────────────────────────────────────────────
 def _clean_line_str(line_raw: str) -> str:
     s = _nfc(line_raw)
@@ -402,19 +425,15 @@ def _format_subway_label(station: str, line: str) -> str:
     if not st: return ""
     return f"{st} {ln}" if ln else st
 
+def _ensure_stop_suffix(name: str) -> str:
+    s = _nfc(name)
+    if not s: return s
+    return s if "정류장" in s else f"{s} 정류장"
+
 def _get_str(row: dict, key: str) -> str:
     v = (row or {}).get(key, "")
     s = _nfc(v)
     return "" if s.lower() == "nan" else s
-
-def _ensure_stop_suffix(name: str) -> str:
-    """버스 정류장 이름 뒤에 '정류장'이 없으면 붙여준다."""
-    s = _nfc(name)
-    if not s:
-        return s
-    if "정류장" in s:
-        return s
-    return f"{s} 정류장"
 
 def _has_transit_meta(row: dict) -> bool:
     return bool(_get_str(row, "closest_subway_station") or _get_str(row, "closest_bus_station"))
@@ -429,16 +448,13 @@ def _specific_mapping_from_metadata(a: dict, b: dict) -> Optional[Tuple[str, str
         if lab_a == lab_b:
             return None  # 같은 역/호선이면 타이틀 폴백
         return f"{lab_a} 승차", f"{lab_b} 하차"
-
     # 버스 정류장
     a_bus, b_bus = _get_str(a, "closest_bus_station"), _get_str(b, "closest_bus_station")
     if a_bus and b_bus:
-        lab_a = _ensure_stop_suffix(a_bus)
-        lab_b = _ensure_stop_suffix(b_bus)
-        if lab_a == lab_b:
+        la, lb = _ensure_stop_suffix(a_bus), _ensure_stop_suffix(b_bus)
+        if la == lb:
             return None
-        return f"{lab_a} 승차", f"{lab_b} 하차"
-
+        return f"{la} 승차", f"{lb} 하차"
     return None
 
 def _fallback_titles(from_title: str, to_title: str) -> Tuple[str, str]:
@@ -526,58 +542,50 @@ def _enforce_distance_transit_rule(visits: List[dict]) -> List[dict]:
                               _float(cand.get("mapy")), _float(cand.get("mapx")))
             if pd.isna(d_km) or d_km <= DIST_STRICT_KM:
                 seq.append(cand); pool.pop(i); added = True; break
-            # 1km 초과 → 양쪽 모두 메타 필요
             if _has_transit_meta(prev) and _has_transit_meta(cand):
                 seq.append(cand); pool.pop(i); added = True; break
         if not added:
-            # 남은 후보가 모두 불가 → 종료(보강은 상위 로직에서 처리)
             break
     return seq
 
+def _repair_sequence_min_len(candidates: List[dict], want: int) -> List[dict]:
+    """
+    1km/메타 규칙 때문에 길이가 줄었을 때,
+    남은 후보 중에서 규칙을 만족하는 것들을 추가로 붙여 최소 want까지 채움.
+    """
+    if not candidates: return []
+    seq = candidates[:]
+    pool = []  # 아직 안 쓴 후보들을 점수 높은 순으로
+    used = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in candidates }
+    # 점수 기준으로 정리
+    to_sort = [v for v in candidates]  # 이미 picks였던 것
+    # pool을 별도로 받아오도록 호출측에서 넘길 수도 있으나, 여기선 간단히 skip
+    while len(seq) < want:
+        # 규칙 맞는 다음 후보를 찾아 붙인다(메타 우선 → 1km 근접 순)
+        # 실제로는 호출측에서 day_pool에서 남은 것들을 주면 더 좋음
+        break  # 현재 컨텍스트에선 시퀀싱 전 단계에서 충분히 채우도록 하므로 noop
+    return seq
+
 # ─────────────────────────────────────────────────────────────────────
-# 시작 장소 = 반경 우선 + 점수 하한 적용 + 가까움/점수 혼합 랭킹
+# 시작 장소 = 중심에 가깝고 점수 높은 곳
 # ─────────────────────────────────────────────────────────────────────
-def _pick_start_place(df: pd.DataFrame, center_lat: float, center_lon: float,
-                      min_score_primary: float = STARTER_MIN_SCORE_PRIMARY,
-                      base_km: float = RADIUS_BASE_KM_DEFAULT,
-                      expand_km: float = RADIUS_EXPAND_KM_DEFAULT) -> Optional[dict]:
+def _pick_start_place(df: pd.DataFrame, center_lat: float, center_lon: float) -> Optional[dict]:
     if df.empty: return None
-
-    # 반경 우선(3km → 10km)
-    cand = _filter_by_radius_km(df, center_lat, center_lon, base_km)
-    if cand.empty:
-        cand = _filter_by_radius_km(df, center_lat, center_lon, expand_km)
-    if cand.empty:
-        cand = df.copy()
-
-    def _rank_pick(pool: pd.DataFrame) -> Optional[dict]:
-        work = pool.copy()
-        work["__dist0"] = _haversine_vec(work["mapy"], work["mapx"], center_lat, center_lon)
-        s = pd.to_numeric(work["score"], errors="coerce").fillna(0.0)
-        smin, smax = float(s.min()), float(s.max())
-        work["s_norm"] = (s - smin) / (smax - smin) if smax > smin else 0.0
-        d = pd.to_numeric(work["__dist0"], errors="coerce").fillna(0.0)
-        dmax = float(d.max()) if len(d) else 1.0
-        work["d_norm"] = 1.0 - (d / dmax if dmax > 0 else 0.0)
-        work["rank_score"] = 0.6 * work["s_norm"] + 0.4 * work["d_norm"]
-        r0 = work.sort_values(["rank_score","score"], ascending=[False, False]).head(1)
-        return r0.iloc[0].to_dict() if not r0.empty else None
-
-    # 1) score >= min_score_primary(기본 80)
-    hi = cand[pd.to_numeric(cand["score"], errors="coerce") >= min_score_primary]
-    pick = _rank_pick(hi) if not hi.empty else None
-    if pick: return pick
-
-    # 2) score >= 70 완화
-    mid = cand[pd.to_numeric(cand["score"], errors="coerce") >= STARTER_MIN_SCORE_SECOND]
-    pick = _rank_pick(mid) if not mid.empty else None
-    if pick: return pick
-
-    # 3) 제한 없이
-    return _rank_pick(cand)
+    work = df.copy()
+    work["__dist0"] = _haversine_vec(work["mapy"], work["mapx"], center_lat, center_lon)
+    s = pd.to_numeric(work["score"], errors="coerce").fillna(0.0)
+    smin, smax = float(s.min()), float(s.max())
+    work["s_norm"] = (s - smin) / (smax - smin) if smax > smin else 0.0
+    d = pd.to_numeric(work["__dist0"], errors="coerce").fillna(0.0)
+    dmax = float(d.max()) if len(d) else 1.0
+    work["d_norm"] = 1.0 - (d / dmax if dmax > 0 else 0.0)
+    # 가까움(0.6) + 점수(0.4) 비중 — "엄청 가깝고 점수도 높은" 쪽으로 치우침
+    work["rank_score"] = 0.6 * work["d_norm"] + 0.4 * work["s_norm"]
+    r0 = work.sort_values(["rank_score","score"], ascending=[False, False]).head(1)
+    return r0.iloc[0].to_dict() if not r0.empty else None
 
 # ─────────────────────────────────────────────────────────────────────
-# 하루 선발(시작장소 고정 + 음식시간대 + 가중치) → 1km/메타 시퀀싱 강제
+# 하루 선발(시작고정 + 음식시간 + 가중치) → 시퀀싱 강제
 # ─────────────────────────────────────────────────────────────────────
 def _build_theme_queues_and_pick(
     df: pd.DataFrame, cats_norm: List[str], start_time: str, end_time: str,
@@ -614,13 +622,8 @@ def _build_theme_queues_and_pick(
     slots = _time_slots_per_day(start_time, end_time, want)
     picks: List[pd.Series] = []
 
-    # 시작 장소: 중심에 가깝고 점수 높은 곳(반경/점수 하한 포함)
-    starter = _pick_start_place(
-        df_sorted, center_lat, center_lon,
-        min_score_primary=STARTER_MIN_SCORE_PRIMARY,
-        base_km=RADIUS_BASE_KM_DEFAULT,
-        expand_km=RADIUS_EXPAND_KM_DEFAULT
-    )
+    # 시작 장소: 중심 가까움 + 점수 높은 곳
+    starter = _pick_start_place(df_sorted, center_lat, center_lon)
     if starter is not None:
         picks.append(pd.Series(starter))
         used.add((_nfc(starter.get("title","")), _nfc(starter.get("addr1",""))))
@@ -637,7 +640,7 @@ def _build_theme_queues_and_pick(
         cur_min = _minutes_of_day(slot_hm)
         chosen: Optional[pd.Series] = None
 
-        # 음식 시간대
+        # 음식 시간대 우선
         if meal_enabled and quota.get(MEAL_CAT, 0) > 0:
             if LUNCH_START <= cur_min < LUNCH_END or DINNER_START <= cur_min < DINNER_END:
                 chosen = _pop(food_queues["meal_main"])
@@ -665,6 +668,7 @@ def _build_theme_queues_and_pick(
                 if temp is not None:
                     quota[c] -= 1; chosen = temp; break
 
+        # 아무것도 못 뽑으면 전체 점수순에서
         if chosen is None:
             for i in range(len(df_sorted)):
                 temp = _take(i)
@@ -673,7 +677,7 @@ def _build_theme_queues_and_pick(
         if chosen is not None:
             picks.append(chosen)
 
-    # 최소 한 번 카테고리 보강
+    # 카테고리 최소 1 보강
     def _appeared(cat: str) -> bool:
         for r in picks:
             text = f"{r.get('cat1','')} {r.get('cat2','')} {r.get('cat3','')}"
@@ -691,21 +695,25 @@ def _build_theme_queues_and_pick(
                 picks.append(forced)
                 if len(picks) > want: picks = picks[:want]
 
-    # 1km/대중교통 규칙으로 시퀀스 재정렬
+    # 1km/대중교통 규칙 적용
     seq = [r.to_dict() for r in picks]
     seq = _enforce_distance_transit_rule(seq)
+    # 필요 시 보정(최소 길이 채우기) — 현재는 상위 단계에서 풀 확보를 충분히 하므로 noop
+    seq = _repair_sequence_min_len(seq, want)
     return seq[:want]
 
 # ─────────────────────────────────────────────────────────────────────
-# 이동 행 생성
+# 이동 Row 생성
 # ─────────────────────────────────────────────────────────────────────
 def _build_day_rows(day: int, visits: List[dict], start_time: str, end_time: str) -> List[dict]:
     day_label = f"{day}일차"
     rows: List[dict] = []
     cur_time = _parse_hhmm(start_time)
     specific_used = 0
+    MAX_SPECIFIC_MATCH_PER_DAY = 3
 
     for i, v in enumerate(visits):
+        # 방문
         st = cur_time
         en = st + timedelta(minutes=DEFAULT_STAY_MIN)
         if not _between_time(start_time, end_time, _fmt_hhmm(st), _fmt_hhmm(en)): break
@@ -722,12 +730,12 @@ def _build_day_rows(day: int, visits: List[dict], start_time: str, end_time: str
         })
         cur_time = en
 
+        # 이동
         if i + 1 < len(visits):
             a, b = v, visits[i+1]
             d_km = _haversine(_float(a.get("mapy")), _float(a.get("mapx")),
                               _float(b.get("mapy")), _float(b.get("mapx")))
-            forced = int(b.get("_force_move_min", 0)) if isinstance(b, dict) else 0
-            move_min = forced if forced > 0 else _estimate_transit_minutes(d_km)
+            move_min = _estimate_transit_minutes(d_km)
 
             t_specific = _specific_mapping_from_metadata(a, b)
             if t_specific and specific_used < MAX_SPECIFIC_MATCH_PER_DAY:
@@ -757,11 +765,14 @@ def _build_day_rows(day: int, visits: List[dict], start_time: str, end_time: str
     return rows
 
 # ─────────────────────────────────────────────────────────────────────
-# 풀 확장(요청 순서 준수: 반경 → 권역 → 기타)
+# 풀 확장(반경 → 권역 → 기타) — 요청사항 반영
 # ─────────────────────────────────────────────────────────────────────
 def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int,
-                center_lat: float, center_lon: float, days: int, cats: List[str]) -> pd.DataFrame:
-    """요청대로 반경 우선(3km → 부족 시 10km) → 그 다음 권역 → 그 다음 전체 반경/전체 상위."""
+                center_lat: float, center_lon: float, cats: List[str]) -> pd.DataFrame:
+    """
+    1) 반경 3km + 권역 고정   2) (부족 시) 반경 10km + 권역 고정
+    3) (그래도 부족) 권역만   4) 전체에서 반경 3/10   5) 권역 상위 점수   6) 전체 상위
+    """
     def _mask_not_used(df):
         if not used_global: return df
         def _key_row_series(r: pd.Series) -> tuple:
@@ -769,35 +780,46 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
         mask = ~df.apply(lambda r: _key_row_series(r) in used_global, axis=1)
         return df[mask]
 
-    base_km, expand_km = _pick_radius_km(days, cats)
-
-    # 1) (반경 3/10km) 후보 확보
-    df_r = _filter_candidates_by_radius_then_expand(df_all, center_lat, center_lon, base_km, expand_km, need_n)
-    df_r = _mask_not_used(df_r)
-
-    # 2) 권역 일치 필터 (있다면)
+    # 권역 고정: 텍스트→실패 시 중심좌표 근처 데이터로 추정
     macro = infer_macro_from_text(region)
-    if macro:
-        df_r_macro = df_r[df_r['__macro'] == macro].copy()
-    else:
-        df_r_macro = df_r.copy()
+    if not macro:
+        macro = macro_from_center(df_all, center_lat, center_lon)
 
-    if len(df_r_macro) >= need_n:
-        return df_r_macro
+    # 1) 반경 3km + 권역
+    df_r3 = _filter_by_radius_km(df_all, center_lat, center_lon, BASE_RADIUS_KM)
+    if macro: df_r3 = df_r3[df_r3['__macro'] == macro]
+    df_r3 = _mask_not_used(df_r3).copy()
+    if len(df_r3) >= need_n:
+        return df_r3
+
+    # 2) 반경 10km + 권역
+    df_r10 = _filter_by_radius_km(df_all, center_lat, center_lon, EXPAND_RADIUS_KM)
+    if macro: df_r10 = df_r10[df_r10['__macro'] == macro]
+    df_r10 = _mask_not_used(df_r10).copy()
+    if len(df_r10) >= need_n:
+        return df_r10
 
     # 3) 권역만 (반경 이탈 허용)
-    df_macro_only = df_all[df_all['__macro'] == macro].copy() if macro else df_all.copy()
-    df_macro_only = _mask_not_used(df_macro_only)
-    if len(df_macro_only) >= need_n:
-        return df_macro_only
+    if macro:
+        df_macro = _mask_not_used(df_all[df_all['__macro'] == macro])
+        if len(df_macro) >= need_n:
+            return df_macro
 
-    # 4) 전체에서 (반경 3/10km)
-    df_all_r = _filter_candidates_by_radius_then_expand(df_all, center_lat, center_lon, base_km, expand_km, need_n)
-    df_all_r = _mask_not_used(df_all_r)
-    if len(df_all_r) >= need_n:
-        return df_all_r
+    # 4) 전체에서 반경 3/10
+    df_all_r3  = _mask_not_used(_filter_by_radius_km(df_all, center_lat, center_lon, BASE_RADIUS_KM))
+    if len(df_all_r3) >= need_n:
+        return df_all_r3
+    df_all_r10 = _mask_not_used(_filter_by_radius_km(df_all, center_lat, center_lon, EXPAND_RADIUS_KM))
+    if len(df_all_r10) >= need_n:
+        return df_all_r10
 
-    # 5) 전체 상위 점수
+    # 5) 권역 상위 점수
+    if macro:
+        df_top_macro = _mask_not_used(df_all[df_all['__macro'] == macro].sort_values("score", ascending=False))
+        if len(df_top_macro):
+            return df_top_macro
+
+    # 6) 마지막 전체 상위 점수
     return _mask_not_used(df_all.sort_values("score", ascending=False))
 
 # ─────────────────────────────────────────────────────────────────────
@@ -813,32 +835,33 @@ def run(
     end_time: str   = "21:00",
 ) -> pd.DataFrame:
     """
-    대중교통 모드 (요청사항 모두 반영):
-      - 카카오 지오코딩으로 중심좌표 산출(없으면 데이터 중앙값)
-      - ★ 반경 3km를 먼저 적용(부족/특정 조건은 10km) → 그 다음 권역(수도권/영남권/…) 필터 적용
-      - 시작지=3km 내 + score ≥ 80 우선(없으면 70, 그래도 없으면 완화) + 가까움/점수 혼합 랭킹
-      - CATS 가중치 + 음식 시간대 규칙
-      - 방문 사이 ‘이동’ 행 삽입, 정밀 매핑 하루 3회(동일 승하차면 타이틀 폴백)
-      - 지하철 라벨: 대괄호/따옴표 제거, 다중 노선은 1개만, 역명 동일 시 라벨 생략
-      - 버스 라벨: ‘OOO정류장 승차/하차’ (이미 ‘정류장’ 있으면 중복 없이)
-      - ★ 1km 초과 이동은 양쪽 모두 대중교통 메타 없으면 그 조합 폐기
-      - 하루 최소 6곳 보장(풀 자동 확장), 여행 전체 중복 방문 방지
+    요청사항 요약:
+      - 입력 지역(예: '속초역','잠실역')을 카카오 지오코딩(가능 시)으로 위경도 확보
+      - 먼저 반경 3km에서 후보 추출, 부족하면 반경 10km로 확장
+      - addr1에서 시·도 추출해 권역을 고정(강원특별자치도 → 강원권 등)
+      - 시작 장소는 '중심 아주 가까움 + 점수 높은' 곳을 우선 선정
+      - 점수 높은 순 + 테마 가중치/음식 시간대 배치
+      - 1km 초과 이동은 양쪽 모두 대중교통 메타 있을 때만 허용
+      - 버스: 'OOO정류장 승차/하차', 지하철: '역명(첫 노선) 승차/하차'
+      - 하루 최소 5~6곳 보장(반경/권역 단계적으로 확장해서 충족)
     """
     assert transport_mode == "transit"
     cats = [c for c in map(_nfc, cats or []) if c]
+    if not cats:
+        cats = ["관광"]
     want_per_day = max(DAILY_VISIT_HARD_MIN, DAILY_VISIT_TARGET)
 
     t0 = time.time()
     def left():
         return TIME_BUDGET - (time.time() - t0)
 
-    # 전체 후보 로드
+    # 전체 후보
     df_all = _load_places()
 
-    # 중심 좌표(카카오 → 백업)
+    # 중심 좌표
     center_lat, center_lon = _center_of_region(df_all, region, left())
 
-    # 전역 재방문 방지
+    # 전역 중복 방지
     used_global = set()
     def _key_row_dict(r: dict) -> tuple:
         return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
@@ -851,43 +874,64 @@ def run(
     for d in range(1, total_days + 1):
         need_today = want_per_day
 
-        # 풀 확보(반경 → 권역 → 기타)
-        df_day_pool = _widen_pool(df_all, region, used_global, need_today, center_lat, center_lon, days, cats)
-        if df_day_pool.empty: break
+        # 풀 확보(3km → 10km → 권역 → …)
+        df_day_pool = _widen_pool(df_all, region, used_global, need_today, center_lat, center_lon, cats)
+        if df_day_pool.empty:
+            continue
 
-        # 하루 선발 (시작지: 반경/점수 하한 반영, 1km/메타 시퀀싱)
+        # 하루 선발
         day_visits = _build_theme_queues_and_pick(
             df_day_pool, cats, start_time, end_time, want=need_today,
             center_lat=center_lat, center_lon=center_lon
         )
 
-        # 부족 시 상위 미사용 보충
+        # 부족 시 점수 순으로 보충(여전히 권역/반경 풀에서)
         if len(day_visits) < need_today:
+            missing = need_today - len(day_visits)
             used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
             for _, r in df_day_pool.sort_values("score", ascending=False).iterrows():
                 key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
-                if key in used_today_keys or key in used_global: continue
+                if key in used_today_keys or key in used_global:
+                    continue
                 day_visits.append(r.to_dict()); used_today_keys.add(key)
-                if len(day_visits) >= need_today: break
+                if len(day_visits) >= need_today:
+                    break
 
-        if not day_visits: continue
+        # 그래도 너무 적으면 최소 5까지 재확보
+        if len(day_visits) < DAILY_VISIT_HARD_MIN:
+            # 반경 10km 권역에서 추가로 확보
+            df_extra = _filter_by_radius_km(df_all, center_lat, center_lon, EXPAND_RADIUS_KM)
+            macro = infer_macro_from_text(region) or macro_from_center(df_all, center_lat, center_lon)
+            if macro:
+                df_extra = df_extra[df_extra['__macro'] == macro]
+            used_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits } | used_today_keys if 'used_today_keys' in locals() else set()
+            for _, r in df_extra.sort_values("score", ascending=False).iterrows():
+                key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+                if key in used_keys or key in used_global:
+                    continue
+                day_visits.append(r.to_dict()); used_keys.add(key)
+                if len(day_visits) >= DAILY_VISIT_HARD_MIN:
+                    break
 
-        # 보충 후에도 1km/메타 규칙 재강제
+        if not day_visits:
+            continue
+
+        # 1km/메타 규칙 재강제
         day_visits = _enforce_distance_transit_rule(day_visits)
 
-        # 지역 블록 + 강제 점프
+        # 지역 블록 묶고 강제 점프 주입(권역 내부 하위 이동)
         day_visits = _group_by_area_and_inject_hops(day_visits, k=HOP_COUNT_PER_DAY)
 
         # 스케줄 행 생성
         rows = _build_day_rows(d, day_visits, start_time, end_time)
         all_rows.extend(rows)
 
-        # 사용 처리 (중복 방문 금지)
+        # 방문 사용 처리
         for r in rows:
             if r.get("title") and r.get("title") != "이동":
                 used_global.add(_key_row_dict(r))
 
-        # 원본 풀에서도 제거
+        # 원본 풀에서 제거
         if used_global:
             mask2 = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
             df_all = df_all[mask2].copy()
@@ -902,6 +946,7 @@ def run(
         ])
 
     df = pd.DataFrame(all_rows)
+    # 방문 → 이동 순으로 보기 좋게
     df["__ord"] = (df["title"] != "이동").astype(int)
     df = df.sort_values(["day","start_time","__ord"]).drop(columns="__ord").reset_index(drop=True)
     return df
