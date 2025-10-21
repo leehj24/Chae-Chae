@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Set
 
 import pandas as pd
 import numpy as np
@@ -106,6 +106,13 @@ def _between_time(day_start: str, day_end: str, s: str, e: str) -> bool:
     ds  = _parse_hhmm(day_start); de = _parse_hhmm(day_end)
     return (ds <= sdt < de) and (ds < edt <= de) and (sdt < edt)
 
+# 키 함수
+def _key_row_dict(r: dict) -> tuple:
+    return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+
+def _key_row_series(r: pd.Series) -> tuple:
+    return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 데이터 적응 레이어
 # ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +187,45 @@ def _region_filter(df: pd.DataFrame, region: str) -> pd.DataFrame:
     if f.empty:
         f = df.copy().head(1000)
     return f.reset_index(drop=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# “첫 시작 장소” 선택 (지역 중심 + 최단거리, 점수 우선)
+# ─────────────────────────────────────────────────────────────────────────────
+def _compute_region_centroid(df: pd.DataFrame, region: str) -> Tuple[float, float]:
+    """region과 매칭되는 후보들의 좌표 평균을 중심으로 사용. 없으면 전체 평균."""
+    region = _nfc(region)
+    sel = _region_filter(df, region)
+    target = sel if not sel.empty else df
+    ys = pd.to_numeric(target["mapy"], errors="coerce")
+    xs = pd.to_numeric(target["mapx"], errors="coerce")
+    ys = ys.dropna(); xs = xs.dropna()
+    if len(ys) == 0 or len(xs) == 0:
+        return np.nan, np.nan
+    return float(ys.mean()), float(xs.mean())
+
+def _choose_start_anchor(df_day_pool: pd.DataFrame, region: str) -> Optional[dict]:
+    """
+    지역 중심(centroid)에서 가장 가까운 후보들 중 점수 높은 항목을 첫 방문지로 선택.
+    거리 우선 → 점수로 tie-break.
+    """
+    if df_day_pool.empty:
+        return None
+    cy, cx = _compute_region_centroid(df_day_pool, region)
+    # 거리 계산
+    cand = df_day_pool.copy()
+    cand["__y"] = pd.to_numeric(cand["mapy"], errors="coerce")
+    cand["__x"] = pd.to_numeric(cand["mapx"], errors="coerce")
+    def _dist(row):
+        if any(pd.isna([row["__y"], row["__x"], cy, cx])):
+            return 1e12
+        return _haversine(row["__y"], row["__x"], cy, cx)
+    cand["__dist"] = cand.apply(_dist, axis=1)
+    # 거리 오름차순, score 내림차순
+    cand = cand.sort_values(["__dist", "score"], ascending=[True, False])
+    row = cand.iloc[0].to_dict()
+    for k in ["__y","__x","__dist"]:
+        row.pop(k, None)
+    return row
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 카테고리/음식 큐
@@ -258,14 +304,11 @@ def _clean_listish_first(value: str) -> str:
     s = _nfc(value)
     if not s:
         return ""
-    # 따옴표 안의 토큰을 우선 추출
     m = re.findall(r"'([^']+)'|\"([^\"]+)\"", s)
     if m:
         first = [a or b for a, b in m][0]
         return _nfc(first)
-    # 대괄호/괄호류 제거
     s2 = s.strip().strip("[](){}")
-    # 쉼표로 분리돼 있으면 첫 항목 선택
     if "," in s2:
         return _nfc(s2.split(",")[0])
     return s2
@@ -306,7 +349,6 @@ def _specific_mapping_from_metadata(a: dict, b: dict) -> Optional[Tuple[str, str
     if a_sub and b_sub:
         a_fmt = _format_station_with_line(a_sub, a_line)
         b_fmt = _format_station_with_line(b_sub, b_line)
-        # 동일역(또는 사실상 동일 표기)이면 매핑 사용 안 함 → 타이틀 폴백
         if _normalize_for_compare(a_fmt) == _normalize_for_compare(b_fmt):
             return None
         t1 = f"{a_fmt} 승차"
@@ -375,7 +417,6 @@ def _group_by_area_and_inject_hops(day_visits: List[dict], k: int) -> List[dict]
     if not areas:
         return day_visits
 
-    # 첫 블록: 가장 많은 후보 지역
     areas_sorted = sorted(areas, key=lambda a: (-len(buckets[a]), a))
     start_area = areas_sorted[0]
     y0, x0 = _centroid(buckets[start_area])
@@ -403,7 +444,6 @@ def _group_by_area_and_inject_hops(day_visits: List[dict], k: int) -> List[dict]
                 block[0] = {**block[0], "_force_move_min": FORCED_HOP_MINUTES}
                 out.extend(block)
 
-    # 계획 외 지역도 뒤에 이어 붙이되, 진입 시 강제 점프
     unused = [a for a in areas if a not in plan]
     for area in unused:
         block = buckets[area]
@@ -417,15 +457,18 @@ def _group_by_area_and_inject_hops(day_visits: List[dict], k: int) -> List[dict]
     return out
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 선발(하루 단위): CATS 가중치/최소1 + 음식 시간대
+# 선발(하루 단위): CATS 가중치/최소1 + 음식 시간대 (+ ban_keys로 중복 방지)
 # ─────────────────────────────────────────────────────────────────────────────
-def _pick_for_day_with_food_and_cats(df: pd.DataFrame, cats_norm: List[str],
-                                     start_time: str, end_time: str,
-                                     want: int) -> List[dict]:
+def _pick_for_day_with_food_and_cats(
+    df: pd.DataFrame, cats_norm: List[str],
+    start_time: str, end_time: str, want: int,
+    ban_keys: Optional[Set[tuple]] = None
+) -> List[dict]:
     """
     - CATS 순서 가중치(앞이 큼) + 각 카테고리 최소 1개(가능한 경우)
     - 점심/저녁엔 '음식-메인', 20시 이후엔 '카페' 우선
     - 못 채우면 점수 상위로 폴백
+    - ban_keys: (title, addr1) 튜플 집합 → 중복 선발 금지(예: 앵커)
     """
     want = max(1, int(want))
     if df.empty:
@@ -436,12 +479,13 @@ def _pick_for_day_with_food_and_cats(df: pd.DataFrame, cats_norm: List[str],
     meal_enabled = (MEAL_CAT in cats_norm)
     food_queues = _build_food_queues(df_sorted) if meal_enabled else {"meal_main": [], "cafe": []}
 
-    used = set()
+    used = set(ban_keys or set())
+
     def _take_from_index(idx: int) -> Optional[pd.Series]:
         if idx < 0 or idx >= len(df_sorted):
             return None
         rec = df_sorted.loc[idx]
-        key = (_nfc(rec.get("title","")), _nfc(rec.get("addr1","")))
+        key = _key_row_series(rec)
         if key in used:
             return None
         used.add(key)
@@ -578,7 +622,6 @@ def _build_day_rows(
             "title": _nfc(v.get("title","")), "addr1": _nfc(v.get("addr1","")),
             "cat1": _nfc(v.get("cat1","")), "cat2": _nfc(v.get("cat2","")), "cat3": _nfc(v.get("cat3","")),
 
-            # 이동행에서 사용되는 필드(방문행에선 빈칸)
             "출발지": "", "교통편1": "", "교통편2": "", "도착지": "",
 
             "final_score": float(_float(v.get("score"), 0.0)),
@@ -604,7 +647,6 @@ def _build_day_rows(
                 t1, t2 = t_specific
                 specific_used += 1
             else:
-                # 정밀 매핑 불가 또는 횟수 초과/동일역 등 → 규칙대로 title 폴백
                 t1, t2 = _fallback_titles(_nfc(a.get("title","")), _nfc(b.get("title","")))
 
             st_m = cur_time
@@ -636,7 +678,7 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
     """
     지역 필터 결과가 부족할 때 후보 풀을 넓혀서 최소 need_n개 이상 되도록 반환.
     1) region 정확 매칭
-    2) 상위 행정구/접두어(예: '성수' → '서울', '서울 성동구' 패턴 등) 확장
+    2) 상위 행정구/접두어 확장
     3) 전체에서 상위 score 순 추출
     모든 단계에서 used_global(이미 방문한 곳)는 제외.
     """
@@ -646,8 +688,6 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
     def _mask_not_used(df):
         if not used_global:
             return df
-        def _key_row_series(r: pd.Series) -> tuple:
-            return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
         mask = ~df.apply(lambda r: _key_row_series(r) in used_global, axis=1)
         return df[mask]
 
@@ -671,11 +711,10 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
     if len(df_top) >= need_n:
         return df_top
 
-    # 그래도 부족하면 가능한 만큼만 반환
     return df_top
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔트리 함수 (전역 재방문 금지 포함 + 하루 6개 보장)
+# 엔트리 함수 (전역 재방문 금지 포함 + 하루 6개 보장 + 첫 시작 장소 고정)
 # ─────────────────────────────────────────────────────────────────────────────
 def run(
     region: str,
@@ -696,8 +735,9 @@ def run(
     - 하루 1~3회 지역 블록 점프(강제 60분 이동) 지원
     - ★ 여행 전체에서 장소 재방문 금지 (title+addr1 기준)
     - ★ 하루당 최소 6곳 이상 무조건 보장(풀 자동 확장)
+    - ★ 매일 첫 시작 장소: 선택한 지역 중심에서 가장 가까운 후보 중 점수 최상 항목 고정
     """
-    cats = [c for c in map(_nfc, cats or []) if c]  # 빈값/공백 제거, 순서 유지
+    cats = [c for c in map(_nfc, cats or []) if c]
     if not cats:
         cats = ["관광"]
 
@@ -709,64 +749,63 @@ def run(
         df_all["score"] = 0.0
     df_all["score"] = pd.to_numeric(df_all["score"], errors="coerce").fillna(0.0)
 
-    # 전역 재방문 금지용 세트
     used_global = set()
-    def _key_row_dict(r: dict) -> tuple:
-        return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
-    def _key_row_series(r: pd.Series) -> tuple:
-        return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
-
     all_rows: List[dict] = []
     total_days = max(1, int(days))
 
     for d in range(1, total_days + 1):
-        # 이 날에 필요한 최소 수
         need_today = want_per_day
 
         # 1) 오늘 사용할 기본 풀 확보(지역 기준) + 부족 시 확장
         df_day_pool = _widen_pool(df_all, region, used_global, need_today)
 
-        # 2) 그래도 '미사용' 후보가 need_today 미만이면, 전체에서 추가 보충
+        # 2) 그래도 부족하면 전체에서 추가 보충
         if len(df_day_pool) < need_today:
             extra = df_all.copy()
             if used_global:
                 mask_ex = ~extra.apply(lambda r: _key_row_series(r) in used_global, axis=1)
                 extra = extra[mask_ex]
             df_day_pool = pd.concat([df_day_pool, extra], ignore_index=True)
-            # 중복 제거
             df_day_pool = df_day_pool.drop_duplicates(subset=["title","addr1"])
 
         if df_day_pool.empty:
-            # 물리적으로 후보가 전혀 없으면 종료
             break
 
-        # 3) 하루분 방문 선발(음식/가중치/최소1 보장)
-        day_visits = _pick_for_day_with_food_and_cats(
-            df_day_pool, cats, start_time, end_time, want=need_today
+        # 3) 첫 시작 장소(앵커) 선정 & 금지키 등록
+        anchor = _choose_start_anchor(df_day_pool, region)
+        ban_keys = set()
+        if anchor is not None:
+            ban_keys.add(_key_row_dict(anchor))
+
+        # 4) 하루분 나머지 방문 선발(음식/가중치/최소1 보장), 앵커 제외
+        rest_need = max(0, need_today - (1 if anchor else 0))
+        day_rest = _pick_for_day_with_food_and_cats(
+            df_day_pool, cats, start_time, end_time, want=rest_need, ban_keys=ban_keys
         )
 
-        # 4) 선발 결과가 6개 미만이면, 점수 상위 미사용 후보로 보충해서 ★무조건 6개 이상★
+        # 5) 보충 로직(최소 6 보장)
+        if anchor:
+            day_visits = [anchor] + day_rest
+        else:
+            day_visits = day_rest
+
         if len(day_visits) < need_today:
             missing = need_today - len(day_visits)
-            used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
-            # df_day_pool에서 미사용 상위 추출
-            can_add = []
+            used_today_keys = { _key_row_dict(v) for v in day_visits }
             for _, r in df_day_pool.sort_values("score", ascending=False).iterrows():
-                key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+                key = _key_row_series(r)
                 if key in used_today_keys or key in used_global:
                     continue
-                can_add.append(r.to_dict())
+                day_visits.append(r.to_dict())
                 used_today_keys.add(key)
-                if len(can_add) >= missing:
+                if len(day_visits) >= need_today:
                     break
-            day_visits.extend(can_add)
 
-        # 최종 안전망: 그래도 부족하면 전체에서 마지막 보충
         if len(day_visits) < need_today:
             missing = need_today - len(day_visits)
-            used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
+            used_today_keys = { _key_row_dict(v) for v in day_visits }
             for _, r in df_all.sort_values("score", ascending=False).iterrows():
-                key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+                key = _key_row_series(r)
                 if key in used_today_keys or key in used_global:
                     continue
                 day_visits.append(r.to_dict())
@@ -777,19 +816,24 @@ def run(
         if not day_visits:
             continue
 
-        # 5) 지역 블록 구성 + 블록 전환 시 60분 강제 이동
-        day_visits = _group_by_area_and_inject_hops(day_visits, k=HOP_COUNT_PER_DAY)
+        # 6) 지역 블록 구성: 앵커는 맨 앞 고정, 나머지에만 블록/점프 적용
+        if anchor:
+            tail = [v for v in day_visits if _key_row_dict(v) != _key_row_dict(anchor)]
+            tail_grouped = _group_by_area_and_inject_hops(tail, k=HOP_COUNT_PER_DAY)
+            day_visits_ordered = [anchor] + tail_grouped
+        else:
+            day_visits_ordered = _group_by_area_and_inject_hops(day_visits, k=HOP_COUNT_PER_DAY)
 
-        # 6) 스케줄(방문→이동) 생성
-        rows = _build_day_rows(d, day_visits, start_time, end_time)
+        # 7) 스케줄(방문→이동) 생성
+        rows = _build_day_rows(d, day_visits_ordered, start_time, end_time)
         all_rows.extend(rows)
 
-        # 7) 오늘 간 '방문' 장소를 전역 used에 추가
+        # 8) 오늘 간 '방문' 장소를 전역 used에 추가
         for r in rows:
             if r.get("title") and r.get("title") != "이동":
                 used_global.add(_key_row_dict(r))
 
-        # 8) 원본 풀에서도 제거(성능/안전)
+        # 9) 원본 풀에서도 제거(성능/안전)
         if used_global:
             mask2 = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
             df_all = df_all[mask2].copy()
