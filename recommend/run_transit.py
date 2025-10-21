@@ -244,18 +244,58 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
     return {cats_norm[i]: final[i] for i in range(L)}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 교통편 매핑(메타데이터 기반) & 폴백
+# 교통편 매핑(메타데이터 기반) & 폴백 (정리/중복처리 강화)
 # ─────────────────────────────────────────────────────────────────────────────
 def _get_str(row: dict, key: str) -> str:
     return _nfc((row or {}).get(key, ""))
+
+def _clean_listish_first(value: str) -> str:
+    """
+    "['2호선', '8호선']" 같이 리스트처럼 생긴 문자열에서
+    따옴표/대괄호 제거 후 첫 항목만 반환.
+    그 외에는 공백/대괄호만 제거해서 반환.
+    """
+    s = _nfc(value)
+    if not s:
+        return ""
+    # 따옴표 안의 토큰을 우선 추출
+    m = re.findall(r"'([^']+)'|\"([^\"]+)\"", s)
+    if m:
+        first = [a or b for a, b in m][0]
+        return _nfc(first)
+    # 대괄호/괄호류 제거
+    s2 = s.strip().strip("[](){}")
+    # 쉼표로 분리돼 있으면 첫 항목 선택
+    if "," in s2:
+        return _nfc(s2.split(",")[0])
+    return s2
+
+def _format_station_with_line(station: str, line: str) -> str:
+    """
+    최종 표기 형태:
+      - 라인이 있으면: "잠실(송파구청)역 2호선"
+      - 없으면:       "잠실(송파구청)역"
+    """
+    st = _nfc(station)
+    ln = _clean_listish_first(line)
+    return f"{st} {ln}" if ln else st
+
+def _normalize_for_compare(s: str) -> str:
+    """동일역/정류장 비교를 위한 정규화: 공백/승하차/괄호/따옴표/역/정류장 제거."""
+    x = _nfc(s)
+    x = re.sub(r"[\"'\[\]\(\)]", "", x)
+    x = x.replace("승차", "").replace("하차", "")
+    x = x.replace("정류장", "").replace("역", "")
+    x = re.sub(r"\s+", "", x)
+    return x
 
 def _specific_mapping_from_metadata(a: dict, b: dict) -> Optional[Tuple[str, str]]:
     """
     장소 메타데이터에 있는 가장 가까운 역/노선/버스정류장 정보를 사용해
     '정밀 매핑' 문구(교통편1/교통편2)를 만든다.
     - 우선순위: 지하철(양쪽 다 역 정보) > 버스(양쪽 다 정류장)
-    - 반환값: (t1, t2)  예) "홍대입구역(2호선) 승차", "을지로입구역(2호선) 하차"
-    - 둘 중 하나라도 정보가 없으면 None
+    - 지하철 라인은 리스트형 문자열일 수 있어 첫 항목만 사용
+    - 승차/하차 역명이 '사실상 동일'하면(정규화 비교) 매핑하지 않고 None 반환 → 타이틀 폴백 유도
     """
     # 1) 지하철 우선
     a_sub = _get_str(a, "closest_subway_station")
@@ -264,18 +304,25 @@ def _specific_mapping_from_metadata(a: dict, b: dict) -> Optional[Tuple[str, str
     b_line = _get_str(b, "closest_subway_line")
 
     if a_sub and b_sub:
-        def _fmt_sub(st, ln):
-            return f"{st}({ln})" if ln else f"{st}"
-        t1 = f"{_fmt_sub(a_sub, a_line)} 승차"
-        t2 = f"{_fmt_sub(b_sub, b_line)} 하차"
+        a_fmt = _format_station_with_line(a_sub, a_line)
+        b_fmt = _format_station_with_line(b_sub, b_line)
+        # 동일역(또는 사실상 동일 표기)이면 매핑 사용 안 함 → 타이틀 폴백
+        if _normalize_for_compare(a_fmt) == _normalize_for_compare(b_fmt):
+            return None
+        t1 = f"{a_fmt} 승차"
+        t2 = f"{b_fmt} 하차"
         return t1, t2
 
     # 2) 버스 정류장
     a_bus = _get_str(a, "closest_bus_station")
     b_bus = _get_str(b, "closest_bus_station")
     if a_bus and b_bus:
-        t1 = f"{a_bus} 승차"
-        t2 = f"{b_bus} 하차"
+        a_bus_clean = _clean_listish_first(a_bus)
+        b_bus_clean = _clean_listish_first(b_bus)
+        if _normalize_for_compare(a_bus_clean) == _normalize_for_compare(b_bus_clean):
+            return None
+        t1 = f"{a_bus_clean} 승차"
+        t2 = f"{b_bus_clean} 하차"
         return t1, t2
 
     # 3) 정밀 매핑 불가
@@ -557,7 +604,7 @@ def _build_day_rows(
                 t1, t2 = t_specific
                 specific_used += 1
             else:
-                # 정밀 매핑 불가 또는 횟수 초과 → 규칙대로 title 폴백
+                # 정밀 매핑 불가 또는 횟수 초과/동일역 등 → 규칙대로 title 폴백
                 t1, t2 = _fallback_titles(_nfc(a.get("title","")), _nfc(b.get("title","")))
 
             st_m = cur_time
@@ -611,8 +658,6 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
         return df_region
 
     # 2) 상위/접두어 확장
-    #    - '성수' → addr1에서 '서울' 같은 상위 토큰을 추정 (간단히 addr1의 첫 토큰들 활용)
-    #    - 너무 공격적이면 과포함될 수 있지만, 보장 우선
     prefix = region.split()[0] if " " in region else region[:2]
     addr1 = df_all["addr1"].astype(str)
     df_wide = df_all[addr1.str.contains(prefix, na=False)].copy()
@@ -647,7 +692,7 @@ def run(
     - 점심/저녁엔 '음식-메인', 20시 이후엔 '카페' 우선 배치
     - 방문 사이 ‘이동’ 행 무조건 삽입
     - day_label 기준 하루당 정밀 교통 매핑 3회만 허용 (메타데이터 열 사용)
-      · 매핑 불가/초과 시 교통편1/2를 출발/도착 title로 채움
+      · 매핑 불가/초과/동일역-동일정류장일 때 교통편1/2는 출발/도착 title로 채움
     - 하루 1~3회 지역 블록 점프(강제 60분 이동) 지원
     - ★ 여행 전체에서 장소 재방문 금지 (title+addr1 기준)
     - ★ 하루당 최소 6곳 이상 무조건 보장(풀 자동 확장)
@@ -729,7 +774,6 @@ def run(
                 if len(day_visits) >= need_today:
                     break
 
-        # (진짜로) 후보 자체가 6 미만인 경우만 제외하고, 이제 최소 6 보장됨
         if not day_visits:
             continue
 
@@ -750,7 +794,6 @@ def run(
             mask2 = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
             df_all = df_all[mask2].copy()
             if df_all.empty and d < total_days:
-                # 남은 날이 있어도 더 이상 후보가 없으면 중단
                 break
 
     if not all_rows:
