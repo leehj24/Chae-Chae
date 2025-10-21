@@ -23,11 +23,12 @@ from recommend.config import (
 MAX_SPECIFIC_MATCH_PER_DAY = 3
 
 # 일정/이동 추정 기본값
-DAILY_VISIT_TARGET    = 6         # 하루 추천 방문지 기본 개수
-DEFAULT_STAY_MIN      = 60        # 기본 체류 시간(분)
-DEFAULT_TRANSIT_KM_H  = 18.0      # 대중교통 평균 이동 속도(km/h) 가정
-PADDING_MIN           = 10        # 이동/대기 여유
-MIN_MOVE_MIN          = 8         # 최소 이동시간(분)
+DAILY_VISIT_TARGET     = 6         # 기본 목표 (하루 추천 방문지 개수)
+DAILY_VISIT_HARD_MIN   = 6         # ★ 하드 하한: 최소 6개 이상 보장
+DEFAULT_STAY_MIN       = 60        # 기본 체류 시간(분)
+DEFAULT_TRANSIT_KM_H   = 18.0      # 대중교통 평균 이동 속도(km/h) 가정
+PADDING_MIN            = 10        # 이동/대기 여유
+MIN_MOVE_MIN           = 8         # 최소 이동시간(분)
 
 # 음식 규칙
 MEAL_CAT = "음식"
@@ -165,24 +166,16 @@ def _region_filter(df: pd.DataFrame, region: str) -> pd.DataFrame:
     region = _nfc(region)
     if not region:
         return df.copy()
+
+    addr1 = df["addr1"].astype(str)
+    title = df["title"].astype(str)
+    cat1  = df["cat1"].astype(str)
+
     mask = (
-        df["addr1"].str.contains(region, na=False)
-        | df["title"].str.contains(region, na=False)
-        | df["cat1"].str.contains(region, na=False)  # NOTE: fix typo? But we'll correct to str.contains
+        addr1.str.contains(region, na=False)
+        | title.str.contains(region, na=False)
+        | cat1.str.contains(region, na=False)
     )
-    # FIX: pandas is case-sensitive; use str.contains (lowercase)
-    try:
-        mask = (
-            df["addr1"].str.contains(region, na=False)
-            | df["title"].str.contains(region, na=False)
-            | df["cat1"].str.contains(region, na=False)
-        )
-    except Exception:
-        mask = (
-            df["addr1"].astype(str).str.contains(region, na=False)
-            | df["title"].astype(str).str.contains(region, na=False)
-            | df["cat1"].astype(str).str.contains(region, na=False)
-        )
     f = df[mask].copy()
     if f.empty:
         f = df.copy().head(1000)
@@ -236,7 +229,7 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
         tail = [max(0.0, (1.0 - sum(weights)) / (L - len(weights)))] * (L - len(weights))
         weights = weights + tail
 
-    base = [1] * L
+    base = [1] * L  # 각 카테고리 최소 1개
     remain = max(0, want - sum(base))
     quota_float = [w * remain for w in weights]
     quota_add = [int(q) for q in quota_float]
@@ -590,7 +583,54 @@ def _build_day_rows(
     return rows
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 엔트리 함수 (전역 재방문 금지 포함)
+# 풀 확장 유틸: 하루 최소 6개 보장을 위해 후보를 넓혀서 확보
+# ─────────────────────────────────────────────────────────────────────────────
+def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int) -> pd.DataFrame:
+    """
+    지역 필터 결과가 부족할 때 후보 풀을 넓혀서 최소 need_n개 이상 되도록 반환.
+    1) region 정확 매칭
+    2) 상위 행정구/접두어(예: '성수' → '서울', '서울 성동구' 패턴 등) 확장
+    3) 전체에서 상위 score 순 추출
+    모든 단계에서 used_global(이미 방문한 곳)는 제외.
+    """
+    region = _nfc(region)
+    df_all = df_all.copy()
+
+    def _mask_not_used(df):
+        if not used_global:
+            return df
+        def _key_row_series(r: pd.Series) -> tuple:
+            return (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+        mask = ~df.apply(lambda r: _key_row_series(r) in used_global, axis=1)
+        return df[mask]
+
+    # 1) 정확 지역 필터
+    df_region = _region_filter(df_all, region)
+    df_region = _mask_not_used(df_region)
+    if len(df_region) >= need_n:
+        return df_region
+
+    # 2) 상위/접두어 확장
+    #    - '성수' → addr1에서 '서울' 같은 상위 토큰을 추정 (간단히 addr1의 첫 토큰들 활용)
+    #    - 너무 공격적이면 과포함될 수 있지만, 보장 우선
+    prefix = region.split()[0] if " " in region else region[:2]
+    addr1 = df_all["addr1"].astype(str)
+    df_wide = df_all[addr1.str.contains(prefix, na=False)].copy()
+    df_wide = _mask_not_used(df_wide)
+    if len(df_wide) >= need_n:
+        return df_wide
+
+    # 3) 전체 상위 점수
+    df_top = df_all.sort_values("score", ascending=False)
+    df_top = _mask_not_used(df_top)
+    if len(df_top) >= need_n:
+        return df_top
+
+    # 그래도 부족하면 가능한 만큼만 반환
+    return df_top
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 엔트리 함수 (전역 재방문 금지 포함 + 하루 6개 보장)
 # ─────────────────────────────────────────────────────────────────────────────
 def run(
     region: str,
@@ -610,15 +650,16 @@ def run(
       · 매핑 불가/초과 시 교통편1/2를 출발/도착 title로 채움
     - 하루 1~3회 지역 블록 점프(강제 60분 이동) 지원
     - ★ 여행 전체에서 장소 재방문 금지 (title+addr1 기준)
+    - ★ 하루당 최소 6곳 이상 무조건 보장(풀 자동 확장)
     """
     cats = [c for c in map(_nfc, cats or []) if c]  # 빈값/공백 제거, 순서 유지
     if not cats:
         cats = ["관광"]
 
-    # 전체 후보 로드 & 지역 필터
-    df_all = _load_places()
-    df_all = _region_filter(df_all, region)
+    want_per_day = max(DAILY_VISIT_HARD_MIN, DAILY_VISIT_TARGET)  # ★ 최소 6 보장
 
+    # 전체 후보 로드
+    df_all = _load_places()
     if "score" not in df_all.columns:
         df_all["score"] = 0.0
     df_all["score"] = pd.to_numeric(df_all["score"], errors="coerce").fillna(0.0)
@@ -634,40 +675,82 @@ def run(
     total_days = max(1, int(days))
 
     for d in range(1, total_days + 1):
-        # 전날까지 간 곳 제외한 후보 풀
-        if used_global:
-            mask = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
-            df_day_pool = df_all[mask].copy()
-        else:
-            df_day_pool = df_all.copy()
+        # 이 날에 필요한 최소 수
+        need_today = want_per_day
+
+        # 1) 오늘 사용할 기본 풀 확보(지역 기준) + 부족 시 확장
+        df_day_pool = _widen_pool(df_all, region, used_global, need_today)
+
+        # 2) 그래도 '미사용' 후보가 need_today 미만이면, 전체에서 추가 보충
+        if len(df_day_pool) < need_today:
+            extra = df_all.copy()
+            if used_global:
+                mask_ex = ~extra.apply(lambda r: _key_row_series(r) in used_global, axis=1)
+                extra = extra[mask_ex]
+            df_day_pool = pd.concat([df_day_pool, extra], ignore_index=True)
+            # 중복 제거
+            df_day_pool = df_day_pool.drop_duplicates(subset=["title","addr1"])
 
         if df_day_pool.empty:
+            # 물리적으로 후보가 전혀 없으면 종료
             break
 
-        # 하루분 방문 선발(음식/가중치/최소1 보장)
+        # 3) 하루분 방문 선발(음식/가중치/최소1 보장)
         day_visits = _pick_for_day_with_food_and_cats(
-            df_day_pool, cats, start_time, end_time, want=DAILY_VISIT_TARGET
+            df_day_pool, cats, start_time, end_time, want=need_today
         )
+
+        # 4) 선발 결과가 6개 미만이면, 점수 상위 미사용 후보로 보충해서 ★무조건 6개 이상★
+        if len(day_visits) < need_today:
+            missing = need_today - len(day_visits)
+            used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
+            # df_day_pool에서 미사용 상위 추출
+            can_add = []
+            for _, r in df_day_pool.sort_values("score", ascending=False).iterrows():
+                key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+                if key in used_today_keys or key in used_global:
+                    continue
+                can_add.append(r.to_dict())
+                used_today_keys.add(key)
+                if len(can_add) >= missing:
+                    break
+            day_visits.extend(can_add)
+
+        # 최종 안전망: 그래도 부족하면 전체에서 마지막 보충
+        if len(day_visits) < need_today:
+            missing = need_today - len(day_visits)
+            used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
+            for _, r in df_all.sort_values("score", ascending=False).iterrows():
+                key = (_nfc(r.get("title","")), _nfc(r.get("addr1","")))
+                if key in used_today_keys or key in used_global:
+                    continue
+                day_visits.append(r.to_dict())
+                used_today_keys.add(key)
+                if len(day_visits) >= need_today:
+                    break
+
+        # (진짜로) 후보 자체가 6 미만인 경우만 제외하고, 이제 최소 6 보장됨
         if not day_visits:
             continue
 
-        # 지역 블록 구성 + 블록 전환 시 60분 강제 이동
+        # 5) 지역 블록 구성 + 블록 전환 시 60분 강제 이동
         day_visits = _group_by_area_and_inject_hops(day_visits, k=HOP_COUNT_PER_DAY)
 
-        # 스케줄(방문→이동) 생성
+        # 6) 스케줄(방문→이동) 생성
         rows = _build_day_rows(d, day_visits, start_time, end_time)
         all_rows.extend(rows)
 
-        # 오늘 간 '방문' 장소를 전역 used에 추가
+        # 7) 오늘 간 '방문' 장소를 전역 used에 추가
         for r in rows:
             if r.get("title") and r.get("title") != "이동":
                 used_global.add(_key_row_dict(r))
 
-        # 성능/안전 차원에서 df_all에서도 제거
+        # 8) 원본 풀에서도 제거(성능/안전)
         if used_global:
             mask2 = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
             df_all = df_all[mask2].copy()
             if df_all.empty and d < total_days:
+                # 남은 날이 있어도 더 이상 후보가 없으면 중단
                 break
 
     if not all_rows:
