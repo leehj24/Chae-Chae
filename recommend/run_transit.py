@@ -12,7 +12,7 @@ import numpy as np
 import unicodedata as ud
 
 from recommend.config import (
-    PATH_TMF,  # 관광지/POI CSV 경로
+    PATH_TMF,  # 관광지/POI CSV 경로 (예: '/mnt/data/관광지_법정동_매핑결과.csv')
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ SIDO_MAP: Dict[str, str] = {
     '충남': '충청남도', '충청남도': '충청남도',
     '충북': '충청북도', '충청북도': '충청북도',
     # 전라
-    '전남': '전라남도', '전라남대': '전라남도', '전라남도': '전라남도',
+    '전남': '전라남도', '전라남도': '전라남도',
     '전북': '전라북도', '전라북도': '전라북도', '전북특별자치도': '전라북도',
     # 경상
     '경남': '경상남도', '경상남도': '경상남도',
@@ -97,9 +97,91 @@ _SIDO_TOKEN_RE = re.compile(
     r"전라남도|전남|경상북도|경북|경상남도|경남|제주특별자치도|제주도|제주시|서귀포시|제주)"
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 문자열/시간/수치 유틸
+# ─────────────────────────────────────────────────────────────────────────────
 def _nfc(s: Optional[str]) -> str:
     return ud.normalize("NFC", str(s)).strip() if s is not None else ""
 
+def _float(x, default=np.nan):
+    try:
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+def _to_float_series(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
+def _haversine(lat1, lon1, lat2, lon2) -> float:
+    """스칼라용 하버사인 거리(km)"""
+    if any(pd.isna([lat1, lon1, lat2, lon2])):
+        return np.nan
+    lat1r, lon1r = math.radians(float(lat1)), math.radians(float(lon1))
+    lat2r, lon2r = math.radians(float(lat2)), math.radians(float(lon2))
+    dlat = lat2r - lat1r
+    dlon = lon2r - lon1r
+    a = math.sin(dlat/2)**2 + math.cos(lat1r)*math.cos(lat2r)*math.sin(dlon/2)**2
+    return 2 * 6371.0088 * math.asin(math.sqrt(a))
+
+def _haversine_km_array(lat1, lon1, lat2, lon2) -> np.ndarray:
+    """배열/Series용 하버사인(km) — lat2/lon2 스칼라 또는 배열 브로드캐스트 허용"""
+    lat1 = _to_float_series(pd.Series(lat1)).to_numpy()
+    lon1 = _to_float_series(pd.Series(lon1)).to_numpy()
+    if isinstance(lat2, (np.ndarray, pd.Series)):
+        lat2 = _to_float_series(pd.Series(lat2)).to_numpy()
+        lon2 = _to_float_series(pd.Series(lon2)).to_numpy()
+    else:
+        lat2 = float(lat2)
+        lon2 = float(lon2)
+    lat1r = np.radians(lat1); lon1r = np.radians(lon1)
+    lat2r = np.radians(lat2); lon2r = np.radians(lon2)
+    dlat = lat2r - lat1r; dlon = lon2r - lon1r
+    a = np.sin(dlat/2.0)**2 + np.cos(lat1r)*np.cos(lat2r)*np.sin(dlon/2.0)**2
+    c = 2.0 * np.arcsin(np.sqrt(a))
+    d = 6371.0088 * c
+    if isinstance(lat2, float):  # lat2/lon2 스칼라일 때 NaN 마스킹
+        mask_nan = np.isnan(lat1) | np.isnan(lon1)
+    else:
+        mask_nan = np.isnan(lat1) | np.isnan(lon1) | np.isnan(lat2r) | np.isnan(lon2r)
+    d[mask_nan] = np.nan
+    return d
+
+def _estimate_transit_minutes(d_km: float) -> int:
+    if pd.isna(d_km):
+        return MIN_MOVE_MIN
+    mins = max(MIN_MOVE_MIN, int(round((d_km / max(1e-6, DEFAULT_TRANSIT_KM_H)) * 60 + PADDING_MIN)))
+    return mins
+
+def _parse_hhmm(s: str) -> datetime:
+    return datetime.strptime(s, "%H:%M")
+
+def _fmt_hhmm(dtobj: datetime) -> str:
+    return dtobj.strftime("%H:%M")
+
+def _minutes_of_day(hhmm: str) -> int:
+    dt = _parse_hhmm(hhmm); return dt.hour * 60 + dt.minute
+
+def _time_slots_per_day(start_hhmm: str, end_hhmm: str, count: int) -> List[str]:
+    t0 = _parse_hhmm(start_hhmm); t1 = _parse_hhmm(end_hhmm)
+    total = (t1 - t0).total_seconds() / 60.0
+    if count <= 0 or total <= 0: return []
+    step = total / count
+    out, cur = [], t0
+    for _ in range(count):
+        out.append(_fmt_hhmm(cur))
+        cur = cur + timedelta(minutes=step)
+    return out
+
+def _between_time(day_start: str, day_end: str, s: str, e: str) -> bool:
+    sdt = _parse_hhmm(s); edt = _parse_hhmm(e)
+    ds  = _parse_hhmm(day_start); de = _parse_hhmm(day_end)
+    return (ds <= sdt < de) and (ds < edt <= de) and (sdt < edt)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 시·도/권역 유틸
+# ─────────────────────────────────────────────────────────────────────────────
 def normalize_sido(name: str) -> Optional[str]:
     if not name: return None
     key = name.strip()
@@ -141,58 +223,6 @@ def infer_macro_from_text(region_text: str) -> Optional[str]:
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 일반 유틸
-# ─────────────────────────────────────────────────────────────────────────────
-def _float(x, default=np.nan):
-    try:
-        if x is None or (isinstance(x, float) and np.isnan(x)):
-            return default
-        return float(x)
-    except Exception:
-        return default
-
-def _haversine(lat1, lon1, lat2, lon2) -> float:
-    if any(pd.isna([lat1, lon1, lat2, lon2])):
-        return np.nan
-    lat1r, lon1r = math.radians(float(lat1)), math.radians(float(lon1))
-    lat2r, lon2r = math.radians(float(lat2)), math.radians(float(lon2))
-    dlat = lat2r - lat1r
-    dlon = lon2r - lon1r
-    a = math.sin(dlat/2)**2 + math.cos(lat1r)*math.cos(lat2r)*math.sin(dlon/2)**2
-    return 2 * 6371.0088 * math.asin(math.sqrt(a))
-
-def _estimate_transit_minutes(d_km: float) -> int:
-    if pd.isna(d_km):
-        return MIN_MOVE_MIN
-    mins = max(MIN_MOVE_MIN, int(round((d_km / max(1e-6, DEFAULT_TRANSIT_KM_H)) * 60 + PADDING_MIN)))
-    return mins
-
-def _parse_hhmm(s: str) -> datetime:
-    return datetime.strptime(s, "%H:%M")
-
-def _fmt_hhmm(dtobj: datetime) -> str:
-    return dtobj.strftime("%H:%M")
-
-def _minutes_of_day(hhmm: str) -> int:
-    dt = _parse_hhmm(hhmm); return dt.hour * 60 + dt.minute
-
-def _time_slots_per_day(start_hhmm: str, end_hhmm: str, count: int) -> List[str]:
-    t0 = _parse_hhmm(start_hhmm); t1 = _parse_hhmm(end_hhmm)
-    total = (t1 - t0).total_seconds() / 60.0
-    if count <= 0 or total <= 0: return []
-    step = total / count
-    out, cur = [], t0
-    for _ in range(count):
-        out.append(_fmt_hhmm(cur))
-        cur = cur + timedelta(minutes=step)
-    return out
-
-def _between_time(day_start: str, day_end: str, s: str, e: str) -> bool:
-    sdt = _parse_hhmm(s); edt = _parse_hhmm(e)
-    ds  = _parse_hhmm(day_start); de = _parse_hhmm(day_end)
-    return (ds <= sdt < de) and (ds < edt <= de) and (sdt < edt)
-
-# ─────────────────────────────────────────────────────────────────────────────
 # 데이터 로드/필터
 # ─────────────────────────────────────────────────────────────────────────────
 def _load_places() -> pd.DataFrame:
@@ -219,7 +249,6 @@ def _load_places() -> pd.DataFrame:
 
     if title is None: df["title"] = ""
     else:             df["title"] = df[title].astype(str)
-
     if addr1 is None: df["addr1"] = ""
     else:             df["addr1"] = df[addr1].astype(str)
 
@@ -227,8 +256,8 @@ def _load_places() -> pd.DataFrame:
     df["cat2"] = df[cat2] if cat2 else ""
     df["cat3"] = df[cat3] if cat3 else ""
 
-    df["mapy"] = df[lat] if lat else np.nan
-    df["mapx"] = df[lon] if lon else np.nan
+    df["mapy"] = pd.to_numeric(df[lat], errors="coerce") if lat else np.nan
+    df["mapx"] = pd.to_numeric(df[lon], errors="coerce") if lon else np.nan
 
     df["score"] = pd.to_numeric(df[score], errors="coerce") if score else 0.0
     df["score"] = df["score"].fillna(0.0)
@@ -247,24 +276,24 @@ def _load_places() -> pd.DataFrame:
     return df
 
 def _region_filter_macro(df: pd.DataFrame, region: str) -> pd.DataFrame:
-    # 광역권 우선
+    """권역(수도권 등) → 키워드 필터(가능하면) → 비면 권역 풀 그대로"""
     macro = infer_macro_from_text(region)
+    work = df.copy()
     if macro:
-        df = df[df['__macro'] == macro].copy()
-        if df.empty:
-            return df
-    # 키워드 세부 필터(있으면)
+        work = work[work['__macro'] == macro].copy()
+
     r = _nfc(region)
     if not r:
-        return df
-    addr1 = df["addr1"].astype(str); title = df["title"].astype(str); cat1 = df["cat1"].astype(str)
-    mask = (addr1.str.contains(r, na=False) | title.str.contains(r, na=False) | cat1.str_contains(r, na=False)
-            if hasattr(pd.Series.str, "str_contains") else
-            (addr1.str.contains(r, na=False) | title.str.contains(r, na=False) | cat1.str.contains(r, na=False)))
-    # 위 한 줄은 일부 환경에서 str.Contains 버그 방지용
-    mask = (addr1.str.contains(r, na=False) | title.str.contains(r, na=False) | cat1.str.contains(r, na=False))
-    sub = df[mask].copy()
-    return sub if not sub.empty else df
+        return work
+
+    addr1 = work["addr1"].astype(str)
+    title = work["title"].astype(str)
+    cat1  = work["cat1"].astype(str)
+    mask = (addr1.str.contains(r, na=False) |
+            title.str.contains(r, na=False) |
+            cat1.str.contains(r, na=False))
+    sub = work[mask].copy()
+    return sub if not sub.empty else work
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 카테고리/음식 큐
@@ -318,17 +347,15 @@ def _allocate_quota_for_day(cats_norm: List[str], want: int) -> Dict[str, int]:
 # ─────────────────────────────────────────────────────────────────────────────
 def _clean_line_str(line_raw: str) -> str:
     """
-    "['2호선', '8호선']" → "2호선" 처럼 깔끔하게 하나만.
+    "['2호선', '8호선']" → "2호선" (첫 요소만)
     "부산 도시철도 2호선" 같은 전체 명칭도 그대로 허용.
     """
     s = _nfc(line_raw)
     if not s or s.lower() == "nan": return ""
-    # 리스트 문자열이면 첫 요소만
     if s.startswith('[') and s.endswith(']'):
         inner = s[1:-1]
         parts = [p.strip().strip("'").strip('"') for p in inner.split(',') if p.strip()]
         return parts[0] if parts else ""
-    # 여러 구분자 포함 시 앞의 하나만
     if ',' in s: return _nfc(s.split(',')[0])
     if '/' in s: return _nfc(s.split('/')[0])
     return s
@@ -351,25 +378,22 @@ def _has_transit_meta(row: dict) -> bool:
     return has_sub or has_bus
 
 def _specific_mapping_from_metadata(a: dict, b: dict) -> Optional[Tuple[str, str]]:
-
+    # 지하철 우선
     a_sub, a_line = _get_str(a, "closest_subway_station"), _get_str(a, "closest_subway_line")
     b_sub, b_line = _get_str(b, "closest_subway_station"), _get_str(b, "closest_subway_line")
     if a_sub and b_sub:
-        t1 = f"{_format_subway_label(a_sub, a_line)} 승차"
-        t2 = f"{_format_subway_label(b_sub, b_line)} 하차"
-        # 양쪽 완전히 동일(역/노선 모두) → 매핑 사용하지 않고 title 폴백을 원함
-        if _format_subway_label(a_sub, a_line) == _format_subway_label(b_sub, b_line):
+        a_lbl = _format_subway_label(a_sub, a_line)
+        b_lbl = _format_subway_label(b_sub, b_line)
+        # 승차/하차 라벨이 완전히 동일하면 매핑 사용하지 않음 → title 폴백 유도
+        if a_lbl == b_lbl:
             return None
-        return (t1, t2)
-
+        return (f"{a_lbl} 승차", f"{b_lbl} 하차")
+    # 버스
     a_bus, b_bus = _get_str(a, "closest_bus_station"), _get_str(b, "closest_bus_station")
     if a_bus and b_bus:
-        t1 = f"{a_bus} 승차"
-        t2 = f"{b_bus} 하차"
         if a_bus == b_bus:
             return None
-        return (t1, t2)
-
+        return (f"{a_bus} 승차", f"{b_bus} 하차")
     return None
 
 def _fallback_titles(from_title: str, to_title: str) -> Tuple[str, str]:
@@ -445,10 +469,9 @@ def _group_by_area_and_inject_hops(day_visits: List[dict], k: int) -> List[dict]
 # “1km 초과 → 양쪽 모두 대중교통 메타 필수” 강제 시퀀싱
 # ─────────────────────────────────────────────────────────────────────────────
 def _enforce_distance_transit_rule(visits: List[dict]) -> List[dict]:
-
     if not visits: return visits
     pool = visits[:]
-    seq: List[dict] = [pool.pop(0)]  # 첫 장소는 나중 로직에서 선정함
+    seq: List[dict] = [pool.pop(0)]
     while pool:
         added = False
         for i in range(len(pool)):
@@ -461,35 +484,42 @@ def _enforce_distance_transit_rule(visits: List[dict]) -> List[dict]:
             # 1km 초과 → 양쪽 모두 메타 필요
             if _has_transit_meta(prev) and _has_transit_meta(cand):
                 seq.append(cand); pool.pop(i); added = True; break
-            # 아니면 cand 불가 → 다른 후보 본다
         if not added:
-            # 남은 후보가 모두 불가 → 종료
-            break
+            break  # 남은 후보가 모두 규칙 위반 → 종료
     return seq
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 하루 선발: CATS 가중치/최소1 + 음식 시간대 + 시작장소 선정
 # ─────────────────────────────────────────────────────────────────────────────
 def _pick_start_place(df: pd.DataFrame, region: str) -> Optional[dict]:
-
     if df.empty: return None
     r = _nfc(region)
-    sub = df[(df["addr1"].astype(str).str.contains(r, na=False)) | (df["title"].astype(str).str.contains(r, na=False))]
+    sub = df[(df["addr1"].astype(str).str.contains(r, na=False)) |
+             (df["title"].astype(str).str.contains(r, na=False))]
     if sub.empty: sub = df.copy()
+
+    # 기준점(선택 지역 근처의 중앙값 좌표)
     cy = float(pd.to_numeric(sub["mapy"], errors="coerce").median())
     cx = float(pd.to_numeric(sub["mapx"], errors="coerce").median())
 
     work = df.copy()
-    work["dist0"] = _haversine(work["mapy"], work["mapx"], cy, cx)
-    # 점수/거리 간단 정규화
+    work["mapy_f"] = pd.to_numeric(work["mapy"], errors="coerce")
+    work["mapx_f"] = pd.to_numeric(work["mapx"], errors="coerce")
+
+    # 🔧 Series 전체에 대해 벡터 하버사인 사용
+    work["dist0"] = _haversine_km_array(work["mapy_f"], work["mapx_f"], cy, cx)
+
+    # 점수/거리 정규화
     s = pd.to_numeric(work["score"], errors="coerce").fillna(0.0)
     smin, smax = float(s.min()), float(s.max())
     work["s_norm"] = (s - smin) / (smax - smin) if smax > smin else 0.0
-    d = pd.to_numeric(work["dist0"], errors="coerce").fillna(0.0)
+
+    d = pd.to_numeric(work["dist0"], errors="coerce")
     dmax = float(d.max()) if len(d) else 1.0
-    work["d_norm"] = 1.0 - (d / dmax if dmax > 0 else 0.0)  # 가까울수록 큼
+    work["d_norm"] = 1.0 - (d / dmax if dmax > 0 else 0.0)  # 가까울수록 크게
+
     work["rank_score"] = 0.6 * work["s_norm"] + 0.4 * work["d_norm"]
-    r0 = work.sort_values(["rank_score","score"], ascending=[False, False]).head(1)
+    r0 = work.sort_values(["rank_score", "score"], ascending=[False, False]).head(1)
     return r0.iloc[0].to_dict() if not r0.empty else None
 
 def _pick_for_day_with_food_and_cats(
@@ -504,7 +534,6 @@ def _pick_for_day_with_food_and_cats(
     food_queues = _build_food_queues(df_sorted) if meal_enabled else {"meal_main": [], "cafe": []}
 
     used = set()
-
     def _take(idx: int) -> Optional[pd.Series]:
         if idx < 0 or idx >= len(df_sorted): return None
         rec = df_sorted.loc[idx]
@@ -526,12 +555,12 @@ def _pick_for_day_with_food_and_cats(
     slots = _time_slots_per_day(start_time, end_time, want)
     picks: List[pd.Series] = []
 
-    # ★ 시작 장소 우선 선정
+    # ★ 시작 장소 우선 선정 (해당 지역에 가깝고 점수 높은 곳)
     starter = _pick_start_place(df_sorted, region)
     if starter is not None:
         picks.append(pd.Series(starter))
         used.add((_nfc(starter.get("title","")), _nfc(starter.get("addr1",""))))
-        # 카테고리 카운트 한 개 소모 처리
+        # 카테고리 1개 소모 처리
         for c in cats_norm:
             text_cats = f"{starter.get('cat1','')} {starter.get('cat2','')} {starter.get('cat3','')}"
             if c and (c in text_cats) and quota.get(c, 0) > 0:
@@ -579,7 +608,7 @@ def _pick_for_day_with_food_and_cats(
         if chosen is not None:
             picks.append(chosen)
 
-    # 카테고리 보강(최소1)
+    # 카테고리 최소 1개 보강
     def _appeared(cat: str) -> bool:
         for r in picks:
             text = f"{r.get('cat1','')} {r.get('cat2','')} {r.get('cat3','')}"
@@ -607,7 +636,6 @@ def _pick_for_day_with_food_and_cats(
 # 스케줄링(방문→이동 행 생성)
 # ─────────────────────────────────────────────────────────────────────────────
 def _build_day_rows(day: int, visits: List[dict], start_time: str, end_time: str) -> List[dict]:
-
     day_label = f"{day}일차"
     rows: List[dict] = []
     cur_time = _parse_hhmm(start_time)
@@ -680,7 +708,7 @@ def _widen_pool(df_all: pd.DataFrame, region: str, used_global: set, need_n: int
         mask = ~df.apply(lambda r: _key_row_series(r) in used_global, axis=1)
         return df[mask]
 
-    # 1) 광역권 + 키워드
+    # 1) 권역 + 키워드
     df_region = _region_filter_macro(df_all, region)
     df_region = _mask_not_used(df_region)
     if len(df_region) >= need_n: return df_region
@@ -718,9 +746,10 @@ def run(
         · 승차/하차 라벨 동일 시 매핑 쓰지 않고 title 폴백
       - ★ 1km 초과 이동이면 인접 양쪽 모두 대중교통 메타 필수(없으면 그 조합 폐기)
       - 시작 장소: 입력 지역과 가장 가깝고 점수도 높은 곳(복합 랭크)
-      - 광역권(수도권/제주/강원/충청/호남/영남) 우선 필터
+      - 권역(수도권/제주/강원/충청/호남/영남) 우선 필터
       - 하루 최소 6곳 보장(풀 자동 확장)
       - 여행 전체 재방문 금지
+      - 지역 블록 전환 시 첫 진입에 60분 강제 이동(하루 1~3회)
     """
     cats = [c for c in map(_nfc, cats or []) if c]
     if not cats: cats = ["관광"]
@@ -743,7 +772,7 @@ def run(
     for d in range(1, total_days + 1):
         need_today = want_per_day
 
-        # 오늘 풀: 광역권/키워드 + 부족 시 확장
+        # 오늘 풀: 권역/키워드 + 부족 시 확장
         df_day_pool = _widen_pool(df_all, region, used_global, need_today)
         if df_day_pool.empty: break
 
@@ -752,7 +781,7 @@ def run(
             df_day_pool, cats, start_time, end_time, want=need_today, region=region
         )
 
-        # 부족하면 상위 미사용으로 보충(그래도 6 보장 시도)
+        # 부족하면 상위 미사용으로 보충(최소 6 보장 시도)
         if len(day_visits) < need_today:
             missing = need_today - len(day_visits)
             used_today_keys = { (_nfc(v.get("title","")), _nfc(v.get("addr1",""))) for v in day_visits }
@@ -762,12 +791,14 @@ def run(
                 day_visits.append(r.to_dict()); used_today_keys.add(key)
                 if len(day_visits) >= need_today: break
 
-        # 최종 안전망
-        if not day_visits: continue
+        # 최종 안전망: 1km/교통메타 규칙 다시 강제
+        if day_visits:
+            day_visits = _enforce_distance_transit_rule(day_visits)
+        if not day_visits:
+            continue
 
-        # ★ 시퀀스 규칙(1km/교통메타)을 이미 한 번 강제했지만,
-        # 보충 과정에서 어긋났을 수 있으니 재강제
-        day_visits = _enforce_distance_transit_rule(day_visits)
+        # 지역 블록 구성 + 블록 전환 시 60분 강제 이동
+        day_visits = _group_by_area_and_inject_hops(day_visits, k=HOP_COUNT_PER_DAY)
 
         # 스케줄 생성
         rows = _build_day_rows(d, day_visits, start_time, end_time)
@@ -779,7 +810,7 @@ def run(
                 used_global.add(_key_row_dict(r))
 
         # 원본 풀에서 제거
-        if used_global is not None and len(used_global) > 0:
+        if used_global:
             mask2 = ~df_all.apply(lambda r: _key_row_series(r) in used_global, axis=1)
             df_all = df_all[mask2].copy()
             if df_all.empty and d < total_days:
